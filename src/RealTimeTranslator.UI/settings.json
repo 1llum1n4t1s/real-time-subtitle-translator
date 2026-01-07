@@ -1,0 +1,49 @@
+{
+  "ASR": {
+    "FastModelPath": "models/ggml-small.bin",
+    "AccurateModelPath": "models/ggml-large-v3.bin",
+    "Language": "en",
+    "UseBeamSearch": true,
+    "BeamSize": 5,
+    "GPU": {
+      "Enabled": true,
+      "DeviceId": 0,
+      "Type": "Auto"
+    }
+  },
+  "Translation": {
+    "ModelPath": "models/translate-en-ja",
+    "SourceLanguage": "en",
+    "TargetLanguage": "ja",
+    "CacheSize": 1000
+  },
+  "Overlay": {
+    "FontFamily": "Yu Gothic UI",
+    "FontSize": 24,
+    "PartialTextColor": "#80FFFFFF",
+    "FinalTextColor": "#FFFFFFFF",
+    "BackgroundColor": "#80000000",
+    "DisplayDuration": 5.0,
+    "FadeOutDuration": 0.5,
+    "BottomMarginPercent": 10,
+    "MaxLines": 3
+  },
+  "AudioCapture": {
+    "SampleRate": 16000,
+    "VADSensitivity": 0.5,
+    "MinSpeechDuration": 0.5,
+    "MaxSpeechDuration": 6.0,
+    "SilenceThreshold": 0.3
+  },
+  "GameProfiles": [
+    {
+      "Name": "サンプルプロファイル",
+      "ProcessName": "game",
+      "Hotwords": ["Character", "Location"],
+      "ASRCorrectionDictionary": {},
+      "PreTranslationDictionary": {},
+      "PostTranslationDictionary": {},
+      "InitialPrompt": ""
+    }
+  ]
+}

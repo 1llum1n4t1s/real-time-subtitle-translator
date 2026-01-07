@@ -1,0 +1,259 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Text;
+using System.Windows.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using RealTimeTranslator.Core.Interfaces;
+using RealTimeTranslator.Core.Models;
+
+namespace RealTimeTranslator.UI.ViewModels;
+
+/// <summary>
+/// メインウィンドウのViewModel
+/// </summary>
+public partial class MainViewModel : ObservableObject
+{
+    private readonly IAudioCaptureService _audioCaptureService;
+    private readonly IVADService _vadService;
+    private readonly IASRService _asrService;
+    private readonly ITranslationService _translationService;
+    private readonly OverlayViewModel _overlayViewModel;
+    private readonly AppSettings _settings;
+    private readonly StringBuilder _logBuilder = new();
+
+    [ObservableProperty]
+    private ObservableCollection<ProcessInfo> _processes = new();
+
+    [ObservableProperty]
+    private ProcessInfo? _selectedProcess;
+
+    [ObservableProperty]
+    private bool _isRunning;
+
+    [ObservableProperty]
+    private string _statusText = "停止中";
+
+    [ObservableProperty]
+    private Brush _statusColor = Brushes.Gray;
+
+    [ObservableProperty]
+    private double _processingLatency;
+
+    [ObservableProperty]
+    private double _translationLatency;
+
+    [ObservableProperty]
+    private string _logText = string.Empty;
+
+    public bool CanStart => SelectedProcess != null && !IsRunning;
+
+    public MainViewModel(
+        IAudioCaptureService audioCaptureService,
+        IVADService vadService,
+        IASRService asrService,
+        ITranslationService translationService,
+        OverlayViewModel overlayViewModel,
+        AppSettings settings)
+    {
+        _audioCaptureService = audioCaptureService;
+        _vadService = vadService;
+        _asrService = asrService;
+        _translationService = translationService;
+        _overlayViewModel = overlayViewModel;
+        _settings = settings;
+
+        // 音声データ受信時の処理
+        _audioCaptureService.AudioDataAvailable += OnAudioDataAvailable;
+
+        // 初期化
+        RefreshProcesses();
+        Log("アプリケーションを起動しました");
+    }
+
+    [RelayCommand]
+    private void RefreshProcesses()
+    {
+        Processes.Clear();
+        
+        var processes = Process.GetProcesses()
+            .Where(p => !string.IsNullOrEmpty(p.MainWindowTitle))
+            .OrderBy(p => p.ProcessName)
+            .Select(p => new ProcessInfo
+            {
+                Id = p.Id,
+                Name = p.ProcessName,
+                Title = p.MainWindowTitle
+            });
+
+        foreach (var process in processes)
+        {
+            Processes.Add(process);
+        }
+
+        Log($"プロセス一覧を更新しました（{Processes.Count}件）");
+    }
+
+    [RelayCommand]
+    private async Task StartAsync()
+    {
+        if (SelectedProcess == null)
+            return;
+
+        try
+        {
+            IsRunning = true;
+            StatusText = "初期化中...";
+            StatusColor = Brushes.Orange;
+
+            // ゲームプロファイルを適用
+            var profile = _settings.GameProfiles
+                .FirstOrDefault(p => p.ProcessName.Equals(SelectedProcess.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (profile != null)
+            {
+                _asrService.SetHotwords(profile.Hotwords);
+                _asrService.SetInitialPrompt(profile.InitialPrompt);
+                _translationService.SetPreTranslationDictionary(profile.PreTranslationDictionary);
+                _translationService.SetPostTranslationDictionary(profile.PostTranslationDictionary);
+                Log($"プロファイル '{profile.Name}' を適用しました");
+            }
+
+            // キャプチャ開始
+            _audioCaptureService.StartCapture(SelectedProcess.Id);
+
+            StatusText = "実行中";
+            StatusColor = Brushes.Green;
+            Log($"'{SelectedProcess.DisplayName}' の音声キャプチャを開始しました");
+        }
+        catch (Exception ex)
+        {
+            IsRunning = false;
+            StatusText = "エラー";
+            StatusColor = Brushes.Red;
+            Log($"エラー: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void Stop()
+    {
+        _audioCaptureService.StopCapture();
+        _overlayViewModel.ClearSubtitles();
+
+        IsRunning = false;
+        StatusText = "停止中";
+        StatusColor = Brushes.Gray;
+        Log("音声キャプチャを停止しました");
+    }
+
+    [RelayCommand]
+    private void OpenSettings()
+    {
+        // TODO: 設定ウィンドウを開く
+        Log("設定画面を開きます（未実装）");
+    }
+
+    private async void OnAudioDataAvailable(object? sender, AudioDataEventArgs e)
+    {
+        try
+        {
+            // VADで発話区間を検出
+            var segments = _vadService.DetectSpeech(e.AudioData);
+
+            foreach (var segment in segments)
+            {
+                // 低遅延ASR（仮字幕）
+                var fastResult = await _asrService.TranscribeFastAsync(segment);
+                ProcessingLatency = fastResult.ProcessingTimeMs;
+
+                if (!string.IsNullOrWhiteSpace(fastResult.Text))
+                {
+                    var partialSubtitle = new SubtitleItem
+                    {
+                        SegmentId = segment.Id,
+                        OriginalText = fastResult.Text,
+                        IsFinal = false
+                    };
+                    _overlayViewModel.AddOrUpdateSubtitle(partialSubtitle);
+                    Log($"[仮] {fastResult.Text}");
+                }
+
+                // 高精度ASR（確定字幕）+ 翻訳
+                _ = ProcessAccurateAsync(segment);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"処理エラー: {ex.Message}");
+        }
+    }
+
+    private async Task ProcessAccurateAsync(SpeechSegment segment)
+    {
+        try
+        {
+            // 高精度ASR
+            var accurateResult = await _asrService.TranscribeAccurateAsync(segment);
+
+            if (string.IsNullOrWhiteSpace(accurateResult.Text))
+                return;
+
+            // 翻訳
+            var translationResult = await _translationService.TranslateAsync(accurateResult.Text);
+            TranslationLatency = translationResult.ProcessingTimeMs;
+
+            // 確定字幕を表示
+            var finalSubtitle = new SubtitleItem
+            {
+                SegmentId = segment.Id,
+                OriginalText = accurateResult.Text,
+                TranslatedText = translationResult.TranslatedText,
+                IsFinal = true
+            };
+            _overlayViewModel.AddOrUpdateSubtitle(finalSubtitle);
+            Log($"[確定] {accurateResult.Text} → {translationResult.TranslatedText}");
+        }
+        catch (Exception ex)
+        {
+            Log($"翻訳エラー: {ex.Message}");
+        }
+    }
+
+    private void Log(string message)
+    {
+        var timestamp = DateTime.Now.ToString("HH:mm:ss");
+        _logBuilder.AppendLine($"[{timestamp}] {message}");
+        
+        // 最新1000行のみ保持
+        var lines = _logBuilder.ToString().Split('\n');
+        if (lines.Length > 1000)
+        {
+            _logBuilder.Clear();
+            _logBuilder.AppendLine(string.Join("\n", lines.TakeLast(1000)));
+        }
+        
+        LogText = _logBuilder.ToString();
+    }
+
+    partial void OnSelectedProcessChanged(ProcessInfo? value)
+    {
+        OnPropertyChanged(nameof(CanStart));
+    }
+
+    partial void OnIsRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanStart));
+    }
+}
+
+/// <summary>
+/// プロセス情報
+/// </summary>
+public class ProcessInfo
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string DisplayName => $"{Name} - {Title}";
+}
