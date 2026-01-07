@@ -1,0 +1,22 @@
+# .gitignore for .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Models (Large files)
+*.bin
+models/
+
+# Logs
+logs/
