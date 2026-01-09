@@ -4,8 +4,10 @@ using System.Text;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.DependencyInjection;
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
+using RealTimeTranslator.UI.Views;
 
 namespace RealTimeTranslator.UI.ViewModels;
 
@@ -20,6 +22,8 @@ public partial class MainViewModel : ObservableObject
     private readonly ITranslationService _translationService;
     private readonly OverlayViewModel _overlayViewModel;
     private readonly AppSettings _settings;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly SettingsFilePath _settingsFilePath;
     private readonly StringBuilder _logBuilder = new();
 
     [ObservableProperty]
@@ -54,7 +58,9 @@ public partial class MainViewModel : ObservableObject
         IASRService asrService,
         ITranslationService translationService,
         OverlayViewModel overlayViewModel,
-        AppSettings settings)
+        AppSettings settings,
+        IServiceProvider serviceProvider,
+        SettingsFilePath settingsFilePath)
     {
         _audioCaptureService = audioCaptureService;
         _vadService = vadService;
@@ -62,12 +68,15 @@ public partial class MainViewModel : ObservableObject
         _translationService = translationService;
         _overlayViewModel = overlayViewModel;
         _settings = settings;
+        _serviceProvider = serviceProvider;
+        _settingsFilePath = settingsFilePath;
 
         // 音声データ受信時の処理
         _audioCaptureService.AudioDataAvailable += OnAudioDataAvailable;
 
         // 初期化
         RefreshProcesses();
+        RestoreLastSelectedProcess();
         Log("アプリケーションを起動しました");
     }
 
@@ -91,6 +100,7 @@ public partial class MainViewModel : ObservableObject
             Processes.Add(process);
         }
 
+        RestoreLastSelectedProcess();
         Log($"プロセス一覧を更新しました（{Processes.Count}件）");
     }
 
@@ -150,8 +160,10 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenSettings()
     {
-        // TODO: 設定ウィンドウを開く
-        Log("設定画面を開きます（未実装）");
+        var window = _serviceProvider.GetRequiredService<SettingsWindow>();
+        window.Owner = App.Current.MainWindow;
+        window.ShowDialog();
+        Log("設定画面を開きました");
     }
 
     private async void OnAudioDataAvailable(object? sender, AudioDataEventArgs e)
@@ -239,11 +251,40 @@ public partial class MainViewModel : ObservableObject
     partial void OnSelectedProcessChanged(ProcessInfo? value)
     {
         OnPropertyChanged(nameof(CanStart));
+        SaveLastSelectedProcess(value);
     }
 
     partial void OnIsRunningChanged(bool value)
     {
         OnPropertyChanged(nameof(CanStart));
+    }
+
+    private void RestoreLastSelectedProcess()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.LastSelectedProcessName))
+        {
+            return;
+        }
+
+        var match = Processes.FirstOrDefault(p =>
+            p.Name.Equals(_settings.LastSelectedProcessName, StringComparison.OrdinalIgnoreCase));
+        if (match != null && !Equals(SelectedProcess, match))
+        {
+            SelectedProcess = match;
+            Log($"前回選択したプロセス '{match.DisplayName}' を復元しました");
+        }
+    }
+
+    private void SaveLastSelectedProcess(ProcessInfo? process)
+    {
+        if (process == null)
+        {
+            return;
+        }
+
+        _settings.LastSelectedProcessName = process.Name;
+        _settings.Save(_settingsFilePath.Value);
+        Log($"選択プロセス '{process.DisplayName}' を設定ファイルに保存しました");
     }
 }
 
