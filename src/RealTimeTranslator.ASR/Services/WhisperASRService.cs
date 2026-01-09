@@ -65,10 +65,7 @@ public class WhisperASRService : IASRService
                     .WithLanguage(_settings.Language)
                     .WithThreads(4);
 
-                if (_settings.UseBeamSearch)
-                {
-                    builder.WithBeamSearchSamplingStrategy();
-                }
+                ApplyBeamSearchSettings(builder);
 
                 ConfigurePromptAndHotwords(builder);
                 _accurateProcessor = builder.Build();
@@ -369,6 +366,44 @@ public class WhisperASRService : IASRService
         return string.Join(" ", parts).Trim();
     }
 
+    private void ApplyBeamSearchSettings(object builder)
+    {
+        if (!_settings.UseBeamSearch)
+        {
+            return;
+        }
+
+        var beamSize = Math.Max(1, _settings.BeamSize);
+        var appliedWithSize = TryInvokeBuilder(builder, "WithBeamSearchSamplingStrategy", beamSize);
+        if (appliedWithSize)
+        {
+            return;
+        }
+
+        var appliedWithoutSize = TryInvokeBuilder(builder, "WithBeamSearchSamplingStrategy");
+        if (appliedWithoutSize)
+        {
+            LogBeamSizeIgnored(beamSize);
+            return;
+        }
+
+        LogBeamSearchUnsupported(beamSize);
+    }
+
+    private static void LogBeamSizeIgnored(int beamSize)
+    {
+        var message = $"Beam Size指定({beamSize})は未対応のため無視されます。";
+        Trace.WriteLine(message);
+        Debug.WriteLine(message);
+    }
+
+    private static void LogBeamSearchUnsupported(int beamSize)
+    {
+        var message = $"Beam Search設定が未対応のため、Beam Size({beamSize})は適用されません。";
+        Trace.WriteLine(message);
+        Debug.WriteLine(message);
+    }
+
     private static bool TryInvokeBuilder(object builder, string methodName, object argument)
     {
         var method = builder.GetType()
@@ -384,6 +419,23 @@ public class WhisperASRService : IASRService
         }
 
         method.Invoke(builder, new[] { argument });
+        return true;
+    }
+
+    private static bool TryInvokeBuilder(object builder, string methodName)
+    {
+        var method = builder.GetType()
+            .GetMethods()
+            .FirstOrDefault(info =>
+                string.Equals(info.Name, methodName, StringComparison.Ordinal)
+                && info.GetParameters().Length == 0);
+
+        if (method == null)
+        {
+            return false;
+        }
+
+        method.Invoke(builder, Array.Empty<object>());
         return true;
     }
 
