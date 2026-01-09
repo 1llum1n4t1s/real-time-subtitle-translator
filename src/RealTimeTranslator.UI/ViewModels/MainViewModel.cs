@@ -116,6 +116,14 @@ public partial class MainViewModel : ObservableObject
         if (SelectedProcess == null)
             return;
 
+        void HandleInitializationFailure(string serviceName, Exception ex)
+        {
+            IsRunning = false;
+            StatusText = $"{serviceName}初期化失敗: {ex.Message}";
+            StatusColor = Brushes.Red;
+            Log($"{serviceName}初期化エラー: {ex}");
+        }
+
         try
         {
             IsRunning = true;
@@ -134,6 +142,32 @@ public partial class MainViewModel : ObservableObject
                 _translationService.SetPreTranslationDictionary(profile.PreTranslationDictionary);
                 _translationService.SetPostTranslationDictionary(profile.PostTranslationDictionary);
                 Log($"プロファイル '{profile.Name}' を適用しました");
+            }
+
+            StatusText = "ASR初期化中...";
+            Log("ASRの初期化を開始しました");
+            try
+            {
+                await _asrService.InitializeAsync();
+                Log("ASRの初期化が完了しました");
+            }
+            catch (Exception ex)
+            {
+                HandleInitializationFailure("ASR", ex);
+                return;
+            }
+
+            StatusText = "翻訳初期化中...";
+            Log("翻訳の初期化を開始しました");
+            try
+            {
+                await _translationService.InitializeAsync();
+                Log("翻訳の初期化が完了しました");
+            }
+            catch (Exception ex)
+            {
+                HandleInitializationFailure("翻訳", ex);
+                return;
             }
 
             // キャプチャ開始
