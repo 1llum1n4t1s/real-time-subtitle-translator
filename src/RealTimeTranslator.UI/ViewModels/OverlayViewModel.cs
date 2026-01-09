@@ -28,6 +28,9 @@ public partial class OverlayViewModel : ObservableObject
     [ObservableProperty]
     private Brush _backgroundBrush = new SolidColorBrush(Color.FromArgb(128, 0, 0, 0));
 
+    [ObservableProperty]
+    private double _bottomMarginPercent = 10;
+
     public OverlayViewModel(OverlaySettings? settings = null)
     {
         _settings = settings ?? new OverlaySettings();
@@ -35,6 +38,7 @@ public partial class OverlayViewModel : ObservableObject
         FontFamily = _settings.FontFamily;
         FontSize = _settings.FontSize;
         BackgroundBrush = ParseBrush(_settings.BackgroundColor);
+        BottomMarginPercent = _settings.BottomMarginPercent;
 
         // 定期的に古い字幕を削除
         _cleanupTimer = new DispatcherTimer
@@ -111,6 +115,20 @@ public partial class OverlayViewModel : ObservableObject
             {
                 Subtitles.Clear();
             }
+        });
+    }
+
+    /// <summary>
+    /// 設定変更を反映
+    /// </summary>
+    public void ReloadSettings()
+    {
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            FontFamily = _settings.FontFamily;
+            FontSize = _settings.FontSize;
+            BackgroundBrush = ParseBrush(_settings.BackgroundColor);
+            BottomMarginPercent = _settings.BottomMarginPercent;
         });
     }
 

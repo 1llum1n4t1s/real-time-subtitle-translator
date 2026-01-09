@@ -25,6 +25,11 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="低遅延モデル"/>
@@ -182,6 +187,11 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="フォント"/>
@@ -199,6 +209,26 @@
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="確定字幕色" Margin="0,6,0,0"/>
                         <TextBox Grid.Row="3" Grid.Column="1" Margin="0,6,0,0"
                                  Text="{Binding Settings.Overlay.FinalTextColor, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="背景色" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.Overlay.BackgroundColor, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="表示時間(秒)" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="5" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.Overlay.DisplayDuration, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="フェードアウト時間(秒)" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="6" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.Overlay.FadeOutDuration, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="下部マージン(%)" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="7" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.Overlay.BottomMarginPercent, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="最大行数" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="8" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.Overlay.MaxLines, UpdateSourceTrigger=PropertyChanged}"/>
                     </Grid>
                 </GroupBox>
 

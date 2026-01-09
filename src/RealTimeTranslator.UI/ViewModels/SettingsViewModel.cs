@@ -15,11 +15,13 @@ public partial class SettingsViewModel : ObservableObject
 {
     private readonly AppSettings _settings;
     private readonly string _settingsPath;
+    private readonly OverlayViewModel _overlayViewModel;
 
-    public SettingsViewModel(AppSettings settings, string settingsPath)
+    public SettingsViewModel(AppSettings settings, string settingsPath, OverlayViewModel overlayViewModel)
     {
         _settings = settings;
         _settingsPath = settingsPath;
+        _overlayViewModel = overlayViewModel;
         GpuTypes = new ReadOnlyCollection<GPUType>(Enum.GetValues<GPUType>());
         GameProfiles = new ObservableCollection<GameProfile>(_settings.GameProfiles);
         SelectedGameProfile = GameProfiles.FirstOrDefault();
@@ -135,6 +137,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         _settings.GameProfiles = GameProfiles.ToList();
         _settings.Save(_settingsPath);
+        _overlayViewModel.ReloadSettings();
         StatusMessage = $"設定を保存しました: {DateTime.Now:HH:mm:ss}";
     }
 
