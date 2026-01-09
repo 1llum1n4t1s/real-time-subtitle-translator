@@ -26,10 +26,6 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="低遅延モデル"/>
@@ -47,6 +43,10 @@
                         <CheckBox Grid.Row="3" Grid.Column="1" Margin="0,6,0,0"
                                   Content="Beam Searchを有効化"
                                   IsChecked="{Binding Settings.ASR.UseBeamSearch}"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Beamサイズ" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.ASR.BeamSize, UpdateSourceTrigger=PropertyChanged}"/>
                     </Grid>
                 </GroupBox>
 
@@ -57,6 +57,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
@@ -100,6 +101,36 @@
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="ターゲット言語" Margin="0,6,0,0"/>
                         <TextBox Grid.Row="2" Grid.Column="1" Margin="0,6,0,0"
                                  Text="{Binding Settings.Translation.TargetLanguage, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="キャッシュサイズ" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.Translation.CacheSize, UpdateSourceTrigger=PropertyChanged}"/>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="更新設定" Padding="10" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <CheckBox Grid.Row="0" Grid.Column="1"
+                                  Content="更新を有効化"
+                                  IsChecked="{Binding Settings.Update.Enabled}"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="フィードURL" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.Update.FeedUrl, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <CheckBox Grid.Row="2" Grid.Column="1" Margin="0,6,0,0"
+                                  Content="更新を自動適用"
+                                  IsChecked="{Binding Settings.Update.AutoApply}"/>
                     </Grid>
                 </GroupBox>
 
