@@ -7,6 +7,11 @@ namespace RealTimeTranslator.Core.Interfaces;
 public interface IASRService : IDisposable
 {
     /// <summary>
+    /// ASRモデルを初期化
+    /// </summary>
+    Task InitializeAsync();
+
+    /// <summary>
     /// 低遅延ASRで音声を文字起こし（仮字幕用）
     /// small/mediumモデルを使用し、即時性を重視
     /// </summary>

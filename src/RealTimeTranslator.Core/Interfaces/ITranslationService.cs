@@ -7,6 +7,11 @@ namespace RealTimeTranslator.Core.Interfaces;
 public interface ITranslationService : IDisposable
 {
     /// <summary>
+    /// 翻訳エンジンを初期化
+    /// </summary>
+    Task InitializeAsync();
+
+    /// <summary>
     /// テキストを翻訳
     /// </summary>
     /// <param name="text">原文</param>
