@@ -175,6 +175,8 @@ public class WhisperASRService : IASRService
     {
         if (!_settings.GPU.Enabled)
         {
+            Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
+            Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
             return;
         }
 
@@ -183,14 +185,18 @@ public class WhisperASRService : IASRService
             case GPUType.AMD_Vulkan:
                 // Vulkan実行時はデバイス番号を環境変数で指定（Whisper.net.Runtime.Vulkan/ggml-vulkan）
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", _settings.GPU.DeviceId.ToString());
+                Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
                 break;
             case GPUType.NVIDIA_CUDA:
                 // CUDA実行時はCUDAデバイスを指定（Whisper.net.Runtime.Cublas）
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", _settings.GPU.DeviceId.ToString());
+                Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
                 break;
             case GPUType.CPU:
             case GPUType.Auto:
             default:
+                Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
+                Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
                 break;
         }
     }
