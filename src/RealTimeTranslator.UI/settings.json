@@ -35,6 +35,12 @@
     "MaxSpeechDuration": 6.0,
     "SilenceThreshold": 0.3
   },
+  "LastSelectedProcessName": "",
+  "Update": {
+    "Enabled": false,
+    "FeedUrl": "",
+    "AutoApply": true
+  },
   "GameProfiles": [
     {
       "Name": "サンプルプロファイル",

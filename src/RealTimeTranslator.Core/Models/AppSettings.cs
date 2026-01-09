@@ -34,6 +34,16 @@ public class AppSettings
     public List<GameProfile> GameProfiles { get; set; } = new();
 
     /// <summary>
+    /// 前回選択したプロセス名
+    /// </summary>
+    public string LastSelectedProcessName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 更新設定
+    /// </summary>
+    public UpdateSettings Update { get; set; } = new();
+
+    /// <summary>
     /// 設定をJSONファイルから読み込み
     /// </summary>
     public static AppSettings Load(string filePath)
@@ -54,6 +64,27 @@ public class AppSettings
         var json = JsonSerializer.Serialize(this, options);
         File.WriteAllText(filePath, json);
     }
+}
+
+/// <summary>
+/// 更新設定
+/// </summary>
+public class UpdateSettings
+{
+    /// <summary>
+    /// 自動更新を有効化
+    /// </summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// 更新フィードURL
+    /// </summary>
+    public string FeedUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 更新を検出したら自動で適用して再起動する
+    /// </summary>
+    public bool AutoApply { get; set; } = true;
 }
 
 /// <summary>
