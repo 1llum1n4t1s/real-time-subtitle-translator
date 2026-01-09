@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Management;
+using System.Net.Http;
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
 using Whisper.net;
@@ -13,6 +14,12 @@ namespace RealTimeTranslator.ASR.Services;
 /// </summary>
 public class WhisperASRService : IASRService
 {
+    private const string DefaultFastModelFileName = "ggml-small.bin";
+    private const string DefaultAccurateModelFileName = "ggml-large-v3.bin";
+    private const string DefaultFastModelDownloadUrl =
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
+    private const string DefaultAccurateModelDownloadUrl =
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin";
     private WhisperProcessor? _fastProcessor;
     private WhisperProcessor? _accurateProcessor;
     private WhisperFactory? _fastFactory;
@@ -37,6 +44,15 @@ public class WhisperASRService : IASRService
     /// </summary>
     public async Task InitializeAsync()
     {
+        var fastModelPath = await EnsureModelAsync(
+            _settings.FastModelPath,
+            DefaultFastModelFileName,
+            DefaultFastModelDownloadUrl);
+        var accurateModelPath = await EnsureModelAsync(
+            _settings.AccurateModelPath,
+            DefaultAccurateModelFileName,
+            DefaultAccurateModelDownloadUrl);
+
         await Task.Run(() =>
         {
             // GPUランタイムの初期化条件:
@@ -44,12 +60,12 @@ public class WhisperASRService : IASRService
             // - NVIDIA CUDA: Whisper.net.Runtime.Cublas が必要。CUDA対応ドライバが必須。
             // - Auto/CPU: 明示的なGPU設定は行わず、Whisper.netに委譲。
             ConfigureGpuRuntime();
-            ValidateModelCompatibility();
+            ValidateModelCompatibility(fastModelPath, accurateModelPath);
 
             // 低遅延モデル（small/medium）の初期化
-            if (File.Exists(_settings.FastModelPath))
+            if (!string.IsNullOrWhiteSpace(fastModelPath) && File.Exists(fastModelPath))
             {
-                _fastFactory = WhisperFactory.FromPath(_settings.FastModelPath);
+                _fastFactory = WhisperFactory.FromPath(fastModelPath);
                 var fastBuilder = _fastFactory.CreateBuilder()
                     .WithLanguage(_settings.Language)
                     .WithThreads(4);
@@ -58,9 +74,9 @@ public class WhisperASRService : IASRService
             }
 
             // 高精度モデル（large系）の初期化
-            if (File.Exists(_settings.AccurateModelPath))
+            if (!string.IsNullOrWhiteSpace(accurateModelPath) && File.Exists(accurateModelPath))
             {
-                _accurateFactory = WhisperFactory.FromPath(_settings.AccurateModelPath);
+                _accurateFactory = WhisperFactory.FromPath(accurateModelPath);
                 var builder = _accurateFactory.CreateBuilder()
                     .WithLanguage(_settings.Language)
                     .WithThreads(4);
@@ -274,18 +290,18 @@ public class WhisperASRService : IASRService
         return GPUType.CPU;
     }
 
-    private void ValidateModelCompatibility()
+    private void ValidateModelCompatibility(string? fastModelPath, string? accurateModelPath)
     {
         if (!_settings.GPU.Enabled || _settings.GPU.Type != GPUType.AMD_Vulkan)
         {
             return;
         }
 
-        EnsureGgmlModel(_settings.FastModelPath);
-        EnsureGgmlModel(_settings.AccurateModelPath);
+        EnsureGgmlModel(fastModelPath);
+        EnsureGgmlModel(accurateModelPath);
     }
 
-    private static void EnsureGgmlModel(string modelPath)
+    private static void EnsureGgmlModel(string? modelPath)
     {
         if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
         {
@@ -298,6 +314,63 @@ public class WhisperASRService : IASRService
             throw new InvalidOperationException(
                 $"AMD Vulkanランタイムはggml形式モデルのみ対応しています。ggml-*.bin を指定してください: {modelPath}");
         }
+    }
+
+    private static async Task<string?> EnsureModelAsync(string modelPath, string defaultFileName, string downloadUrl)
+    {
+        var resolvedPath = ResolveModelPath(modelPath, defaultFileName);
+        if (string.IsNullOrWhiteSpace(resolvedPath))
+        {
+            return null;
+        }
+
+        if (File.Exists(resolvedPath))
+        {
+            return resolvedPath;
+        }
+
+        var targetDirectory = Path.GetDirectoryName(resolvedPath);
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            Directory.CreateDirectory(targetDirectory);
+        }
+
+        try
+        {
+            using var httpClient = new HttpClient();
+            using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+
+            await using var httpStream = await response.Content.ReadAsStreamAsync();
+            await using var fileStream = new FileStream(resolvedPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            await httpStream.CopyToAsync(fileStream);
+            Console.WriteLine($"Downloaded ASR model to: {resolvedPath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to download ASR model: {ex.Message}");
+        }
+
+        return resolvedPath;
+    }
+
+    private static string? ResolveModelPath(string modelPath, string defaultFileName)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+        {
+            return null;
+        }
+
+        var rootPath = Path.IsPathRooted(modelPath)
+            ? modelPath
+            : Path.Combine(AppContext.BaseDirectory, modelPath);
+
+        if (Directory.Exists(rootPath) || !Path.HasExtension(rootPath))
+        {
+            return Path.Combine(rootPath, defaultFileName);
+        }
+
+        return rootPath;
     }
 
     /// <summary>
