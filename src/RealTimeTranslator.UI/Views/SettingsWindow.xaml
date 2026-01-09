@@ -98,6 +98,79 @@
                     </Grid>
                 </GroupBox>
 
+                <GroupBox Header="ゲームプロファイル設定" Padding="10" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="プロファイル"/>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
+                            <ComboBox Width="220"
+                                      ItemsSource="{Binding GameProfiles}"
+                                      DisplayMemberPath="Name"
+                                      SelectedItem="{Binding SelectedGameProfile}"/>
+                            <Button Content="追加" Width="70" Margin="6,0,0,0"
+                                    Command="{Binding AddProfileCommand}"/>
+                            <Button Content="削除" Width="70" Margin="6,0,0,0"
+                                    Command="{Binding RemoveProfileCommand}"/>
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="プロファイル名" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding SelectedGameProfile.Name, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="プロセス名" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding SelectedGameProfile.ProcessName, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="ホットワード" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" Margin="0,6,0,0"
+                                 AcceptsReturn="True"
+                                 Height="70"
+                                 Text="{Binding HotwordsText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="1行に1語で入力"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="ASR補正辞書" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" Margin="0,6,0,0"
+                                 AcceptsReturn="True"
+                                 Height="80"
+                                 Text="{Binding ASRCorrectionDictionaryText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="key=value 形式で1行に1エントリ"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="翻訳前辞書" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="5" Grid.Column="1" Margin="0,6,0,0"
+                                 AcceptsReturn="True"
+                                 Height="80"
+                                 Text="{Binding PreTranslationDictionaryText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="key=value 形式で1行に1エントリ"/>
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="翻訳後辞書" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="6" Grid.Column="1" Margin="0,6,0,0"
+                                 AcceptsReturn="True"
+                                 Height="80"
+                                 Text="{Binding PostTranslationDictionaryText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="key=value 形式で1行に1エントリ"/>
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="初期プロンプト" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="7" Grid.Column="1" Margin="0,6,0,0"
+                                 AcceptsReturn="True"
+                                 Height="80"
+                                 Text="{Binding InitialPromptText, UpdateSourceTrigger=PropertyChanged}"/>
+                    </Grid>
+                </GroupBox>
+
                 <GroupBox Header="オーバーレイ設定" Padding="10" Margin="0,0,0,10">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -139,6 +212,8 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="サンプルレート"/>
@@ -149,9 +224,17 @@
                         <TextBox Grid.Row="1" Grid.Column="1" Margin="0,6,0,0"
                                  Text="{Binding Settings.AudioCapture.VADSensitivity, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="最大発話長(秒)" Margin="0,6,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="最小発話長(秒)" Margin="0,6,0,0"/>
                         <TextBox Grid.Row="2" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.AudioCapture.MinSpeechDuration, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="最大発話長(秒)" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" Margin="0,6,0,0"
                                  Text="{Binding Settings.AudioCapture.MaxSpeechDuration, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="無音判定閾値(秒)" Margin="0,6,0,0"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" Margin="0,6,0,0"
+                                 Text="{Binding Settings.AudioCapture.SilenceThreshold, UpdateSourceTrigger=PropertyChanged}"/>
                     </Grid>
                 </GroupBox>
             </StackPanel>
