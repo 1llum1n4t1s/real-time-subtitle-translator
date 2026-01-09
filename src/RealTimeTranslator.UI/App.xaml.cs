@@ -83,7 +83,8 @@ public partial class App : Application
         services.AddSingleton(sp =>
             new SettingsViewModel(
                 sp.GetRequiredService<AppSettings>(),
-                sp.GetRequiredService<SettingsFilePath>().Value));
+                sp.GetRequiredService<SettingsFilePath>().Value,
+                sp.GetRequiredService<OverlayViewModel>()));
 
         services.AddTransient<SettingsWindow>();
     }
