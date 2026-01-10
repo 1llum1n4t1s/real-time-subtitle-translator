@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -27,6 +28,7 @@ public partial class MainViewModel : ObservableObject
     private readonly SettingsFilePath _settingsFilePath;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly StringBuilder _logBuilder = new();
+    private CancellationTokenSource? _processingCancellation;
 
     [ObservableProperty]
     private ObservableCollection<ProcessInfo> _processes = new();
@@ -149,6 +151,9 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
+            _processingCancellation?.Cancel();
+            _processingCancellation?.Dispose();
+            _processingCancellation = new CancellationTokenSource();
             IsRunning = true;
             StatusText = "初期化中...";
             StatusColor = Brushes.Orange;
@@ -212,6 +217,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void Stop()
     {
+        _processingCancellation?.Cancel();
+        _processingCancellation?.Dispose();
+        _processingCancellation = null;
         _audioCaptureService.StopCapture();
         _overlayViewModel.ClearSubtitles();
 
@@ -234,17 +242,35 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
+            if (!IsRunning || _processingCancellation == null || _processingCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
             // VADで発話区間を検出
             var segments = _vadService.DetectSpeech(e.AudioData);
 
             foreach (var segment in segments)
             {
+                if (!IsRunning || _processingCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 // 低遅延ASR（仮字幕）
                 var fastResult = await _asrService.TranscribeFastAsync(segment);
+                if (!IsRunning || _processingCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
                 ProcessingLatency = fastResult.ProcessingTimeMs;
 
                 if (!string.IsNullOrWhiteSpace(fastResult.Text))
                 {
+                    if (!IsRunning || _processingCancellation.IsCancellationRequested)
+                    {
+                        return;
+                    }
                     var partialSubtitle = new SubtitleItem
                     {
                         SegmentId = segment.Id,
@@ -256,7 +282,7 @@ public partial class MainViewModel : ObservableObject
                 }
 
                 // 高精度ASR（確定字幕）+ 翻訳
-                _ = ProcessAccurateAsync(segment);
+                _ = ProcessAccurateAsync(segment, _processingCancellation.Token);
             }
         }
         catch (Exception ex)
@@ -265,20 +291,38 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private async Task ProcessAccurateAsync(SpeechSegment segment)
+    private async Task ProcessAccurateAsync(SpeechSegment segment, CancellationToken token)
     {
         try
         {
+            if (token.IsCancellationRequested || !IsRunning)
+            {
+                return;
+            }
+
             // 高精度ASR
             var accurateResult = await _asrService.TranscribeAccurateAsync(segment);
+            if (token.IsCancellationRequested || !IsRunning)
+            {
+                return;
+            }
 
             if (string.IsNullOrWhiteSpace(accurateResult.Text))
                 return;
+
+            if (token.IsCancellationRequested || !IsRunning)
+            {
+                return;
+            }
 
             // 翻訳
             var sourceLanguage = _settings.Translation.SourceLanguage;
             var targetLanguage = _settings.Translation.TargetLanguage;
             var translationResult = await _translationService.TranslateAsync(accurateResult.Text, sourceLanguage, targetLanguage);
+            if (token.IsCancellationRequested || !IsRunning)
+            {
+                return;
+            }
             TranslationLatency = translationResult.ProcessingTimeMs;
 
             // 確定字幕を表示
