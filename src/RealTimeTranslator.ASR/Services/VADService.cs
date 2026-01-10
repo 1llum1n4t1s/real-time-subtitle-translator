@@ -125,6 +125,22 @@ public class VADService : IVADService
         return segments;
     }
 
+    /// <summary>
+    /// 残留バッファを確定して返す
+    /// </summary>
+    public SpeechSegment? FlushPendingSegment()
+    {
+        if (!_isSpeaking || _currentSpeechBuffer.Count == 0)
+        {
+            Reset();
+            return null;
+        }
+
+        var segment = CreateSegment();
+        Reset();
+        return segment;
+    }
+
     private SpeechSegment? CreateSegment()
     {
         float duration = _currentTime - _speechStartTime;

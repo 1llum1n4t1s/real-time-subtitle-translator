@@ -16,6 +16,12 @@ public interface IVADService
     IEnumerable<SpeechSegment> DetectSpeech(float[] audioData);
 
     /// <summary>
+    /// 残留バッファを確定して返す
+    /// </summary>
+    /// <returns>残留発話区間（無ければnull）</returns>
+    SpeechSegment? FlushPendingSegment();
+
+    /// <summary>
     /// VADの感度設定（0.0〜1.0）
     /// </summary>
     float Sensitivity { get; set; }
