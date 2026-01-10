@@ -276,7 +276,9 @@ public partial class MainViewModel : ObservableObject
                 return;
 
             // 翻訳
-            var translationResult = await _translationService.TranslateAsync(accurateResult.Text);
+            var sourceLanguage = _settings.Translation.SourceLanguage;
+            var targetLanguage = _settings.Translation.TargetLanguage;
+            var translationResult = await _translationService.TranslateAsync(accurateResult.Text, sourceLanguage, targetLanguage);
             TranslationLatency = translationResult.ProcessingTimeMs;
 
             // 確定字幕を表示
@@ -288,11 +290,13 @@ public partial class MainViewModel : ObservableObject
                 IsFinal = true
             };
             _overlayViewModel.AddOrUpdateSubtitle(finalSubtitle);
-            Log($"[確定] {accurateResult.Text} → {translationResult.TranslatedText}");
+            Log($"[確定] ({sourceLanguage}→{targetLanguage}) {accurateResult.Text} → {translationResult.TranslatedText}");
         }
         catch (Exception ex)
         {
-            Log($"翻訳エラー: {ex.Message}");
+            var sourceLanguage = _settings.Translation.SourceLanguage;
+            var targetLanguage = _settings.Translation.TargetLanguage;
+            Log($"翻訳エラー ({sourceLanguage}→{targetLanguage}): {ex.Message}");
         }
     }
 
