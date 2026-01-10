@@ -10,11 +10,14 @@ namespace RealTimeTranslator.UI.ViewModels;
 /// <summary>
 /// オーバーレイウィンドウのViewModel
 /// </summary>
-public partial class OverlayViewModel : ObservableObject
+public partial class OverlayViewModel : ObservableObject, IDisposable
 {
+    private const int CleanupIntervalMs = 100; // クリーンアップ間隔（ミリ秒）
+
     private readonly OverlaySettings _settings;
     private readonly DispatcherTimer _cleanupTimer;
     private readonly object _subtitlesLock = new();
+    private bool _isDisposed;
 
     [ObservableProperty]
     private ObservableCollection<SubtitleDisplayItem> _subtitles = new();
@@ -34,7 +37,7 @@ public partial class OverlayViewModel : ObservableObject
     public OverlayViewModel(OverlaySettings? settings = null)
     {
         _settings = settings ?? new OverlaySettings();
-        
+
         FontFamily = _settings.FontFamily;
         FontSize = _settings.FontSize;
         BackgroundBrush = ParseBrush(_settings.BackgroundColor);
@@ -43,10 +46,20 @@ public partial class OverlayViewModel : ObservableObject
         // 定期的に古い字幕を削除
         _cleanupTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(100)
+            Interval = TimeSpan.FromMilliseconds(CleanupIntervalMs)
         };
         _cleanupTimer.Tick += CleanupOldSubtitles;
         _cleanupTimer.Start();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+            return;
+
+        _cleanupTimer.Stop();
+        _cleanupTimer.Tick -= CleanupOldSubtitles;
+        _isDisposed = true;
     }
 
     /// <summary>
@@ -134,14 +147,37 @@ public partial class OverlayViewModel : ObservableObject
 
     private static Brush ParseBrush(string colorString)
     {
+        return BrushHelper.ParseBrush(colorString, Colors.Black);
+    }
+}
+
+/// <summary>
+/// Brush変換のヘルパークラス
+/// </summary>
+internal static class BrushHelper
+{
+    public static Brush ParseBrush(string colorString, Color fallbackColor)
+    {
+        if (string.IsNullOrWhiteSpace(colorString))
+        {
+            System.Diagnostics.Debug.WriteLine($"Color string is null or empty, using fallback: {fallbackColor}");
+            return new SolidColorBrush(fallbackColor);
+        }
+
         try
         {
             var color = (Color)ColorConverter.ConvertFromString(colorString);
             return new SolidColorBrush(color);
         }
-        catch
+        catch (FormatException ex)
         {
-            return new SolidColorBrush(Colors.Black);
+            System.Diagnostics.Debug.WriteLine($"Invalid color format '{colorString}': {ex.Message}. Using fallback: {fallbackColor}");
+            return new SolidColorBrush(fallbackColor);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error parsing color '{colorString}': {ex.Message}. Using fallback: {fallbackColor}");
+            return new SolidColorBrush(fallbackColor);
         }
     }
 }
@@ -175,7 +211,7 @@ public partial class SubtitleDisplayItem : ObservableObject
     public void Update(SubtitleItem item, OverlaySettings settings)
     {
         DisplayText = item.DisplayText;
-        TextBrush = ParseBrush(item.IsFinal ? settings.FinalTextColor : settings.PartialTextColor);
+        TextBrush = BrushHelper.ParseBrush(item.IsFinal ? settings.FinalTextColor : settings.PartialTextColor, Colors.White);
         _displayEndTime = DateTime.Now.AddSeconds(settings.DisplayDuration);
         Opacity = 1.0;
     }
@@ -194,18 +230,5 @@ public partial class SubtitleDisplayItem : ObservableObject
         }
 
         return true;
-    }
-
-    private static Brush ParseBrush(string colorString)
-    {
-        try
-        {
-            var color = (Color)ColorConverter.ConvertFromString(colorString);
-            return new SolidColorBrush(color);
-        }
-        catch
-        {
-            return Brushes.White;
-        }
     }
 }

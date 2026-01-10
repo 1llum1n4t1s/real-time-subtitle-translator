@@ -9,29 +9,35 @@ namespace RealTimeTranslator.ASR.Services;
 /// </summary>
 public class VADService : IVADService
 {
+    private const int FramesPerSecond = 100; // 1秒あたりのフレーム数 (10ms/フレーム)
+    private const float BaseEnergyThreshold = 0.01f; // 基本エネルギー閾値
+    private const float MaxEnergyThreshold = 0.1f; // 最大エネルギー閾値
+
     private int _sampleRate;
+    private float _sensitivity;
+    private float _minSpeechDuration;
+    private float _maxSpeechDuration;
+    private float _silenceThreshold;
+
     private readonly List<float> _audioBuffer = new();
-    private readonly object _bufferLock = new();
+    private readonly object _settingsLock = new();
     private float _currentTime = 0;
     private bool _isSpeaking = false;
     private float _speechStartTime = 0;
     private readonly List<float> _currentSpeechBuffer = new();
-
-    public float Sensitivity { get; set; } = 0.5f;
-    public float MinSpeechDuration { get; set; } = 0.5f;
-    public float MaxSpeechDuration { get; set; } = 6.0f;
-
-    private float _silenceThreshold = 0.3f;
     private float _silenceDuration = 0;
 
     public VADService(AudioCaptureSettings? settings = null)
     {
         var s = settings ?? new AudioCaptureSettings();
-        _sampleRate = s.SampleRate;
-        Sensitivity = s.VADSensitivity;
-        MinSpeechDuration = s.MinSpeechDuration;
-        MaxSpeechDuration = s.MaxSpeechDuration;
-        _silenceThreshold = s.SilenceThreshold;
+        lock (_settingsLock)
+        {
+            _sampleRate = s.SampleRate;
+            _sensitivity = s.VADSensitivity;
+            _minSpeechDuration = s.MinSpeechDuration;
+            _maxSpeechDuration = s.MaxSpeechDuration;
+            _silenceThreshold = s.SilenceThreshold;
+        }
     }
 
     /// <summary>
@@ -44,11 +50,14 @@ public class VADService : IVADService
             throw new ArgumentNullException(nameof(settings));
         }
 
-        _sampleRate = settings.SampleRate;
-        Sensitivity = settings.VADSensitivity;
-        MinSpeechDuration = settings.MinSpeechDuration;
-        MaxSpeechDuration = settings.MaxSpeechDuration;
-        _silenceThreshold = settings.SilenceThreshold;
+        lock (_settingsLock)
+        {
+            _sampleRate = settings.SampleRate;
+            _sensitivity = settings.VADSensitivity;
+            _minSpeechDuration = settings.MinSpeechDuration;
+            _maxSpeechDuration = settings.MaxSpeechDuration;
+            _silenceThreshold = settings.SilenceThreshold;
+        }
 
         Reset();
     }
@@ -60,9 +69,18 @@ public class VADService : IVADService
     {
         var segments = new List<SpeechSegment>();
 
-        // フレーム単位で処理（10ms = 160サンプル @ 16kHz）
-        int frameSize = _sampleRate / 100;
-        float frameDuration = 1.0f / 100;
+        // 設定値をスレッドセーフに読み取り
+        int frameSize;
+        float maxSpeechDuration;
+        float silenceThreshold;
+        lock (_settingsLock)
+        {
+            frameSize = _sampleRate / FramesPerSecond;
+            maxSpeechDuration = _maxSpeechDuration;
+            silenceThreshold = _silenceThreshold;
+        }
+
+        float frameDuration = 1.0f / FramesPerSecond;
 
         for (int i = 0; i < audioData.Length; i += frameSize)
         {
@@ -94,7 +112,7 @@ public class VADService : IVADService
                 _currentSpeechBuffer.AddRange(frame.ToArray());
 
                 // 無音が閾値を超えたら発話終了
-                if (_silenceDuration >= _silenceThreshold)
+                if (_silenceDuration >= silenceThreshold)
                 {
                     var segment = CreateSegment();
                     if (segment != null)
@@ -108,7 +126,7 @@ public class VADService : IVADService
 
             // 最大発話長を超えた場合は強制的に分割
             float currentSpeechDuration = _currentTime - _speechStartTime;
-            if (_isSpeaking && currentSpeechDuration >= MaxSpeechDuration)
+            if (_isSpeaking && currentSpeechDuration >= maxSpeechDuration)
             {
                 var segment = CreateSegment();
                 if (segment != null)
@@ -146,7 +164,13 @@ public class VADService : IVADService
         float duration = _currentTime - _speechStartTime;
 
         // 最小発話長未満は無視
-        if (duration < MinSpeechDuration)
+        float minSpeechDuration;
+        lock (_settingsLock)
+        {
+            minSpeechDuration = _minSpeechDuration;
+        }
+
+        if (duration < minSpeechDuration)
             return null;
 
         return new SpeechSegment
@@ -174,9 +198,12 @@ public class VADService : IVADService
     {
         // 感度に基づいて閾値を調整
         // 感度が高い（1.0に近い）ほど、閾値は低くなる
-        float baseThreshold = 0.01f;
-        float maxThreshold = 0.1f;
-        return baseThreshold + (maxThreshold - baseThreshold) * (1 - Sensitivity);
+        float sensitivity;
+        lock (_settingsLock)
+        {
+            sensitivity = _sensitivity;
+        }
+        return BaseEnergyThreshold + (MaxEnergyThreshold - BaseEnergyThreshold) * (1 - sensitivity);
     }
 
     /// <summary>

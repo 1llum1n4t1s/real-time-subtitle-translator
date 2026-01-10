@@ -8,7 +8,9 @@ namespace RealTimeTranslator.UI.Services;
 
 public class UpdateService : IUpdateService
 {
-    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(6);
+    private const int UpdateCheckIntervalHours = 6; // 更新チェック間隔（時間）
+
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(UpdateCheckIntervalHours);
     private readonly object _syncLock = new();
     private UpdateSettings _settings = new();
     private UpdateInfo? _pendingUpdateInfo;
