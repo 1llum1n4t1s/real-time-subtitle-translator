@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -30,6 +31,12 @@ public partial class MainViewModel : ObservableObject
     private readonly SettingsViewModel _settingsViewModel;
     private readonly StringBuilder _logBuilder = new();
     private CancellationTokenSource? _processingCancellation;
+    private Channel<SpeechSegmentWorkItem>? _segmentChannel;
+    private Channel<SpeechSegmentWorkItem>? _accurateChannel;
+    private Task? _fastProcessingTask;
+    private Task? _accurateProcessingTask;
+    private long _segmentSequence;
+    private const int MaxAccurateParallelism = 2;
 
     [ObservableProperty]
     private ObservableCollection<ProcessInfo> _processes = new();
@@ -222,6 +229,8 @@ public partial class MainViewModel : ObservableObject
                 Log("翻訳モデル未ロードのためタグ付け翻訳にフォールバックします。");
             }
 
+            StartProcessingPipelines(_processingCancellation.Token);
+
             // キャプチャ開始
             _audioCaptureService.StartCapture(SelectedProcess.Id);
 
@@ -244,6 +253,7 @@ public partial class MainViewModel : ObservableObject
         _processingCancellation?.Cancel();
         _processingCancellation?.Dispose();
         _processingCancellation = null;
+        StopProcessingPipelines();
         var pendingSegment = _vadService.FlushPendingSegment();
         if (pendingSegment != null)
         {
@@ -267,11 +277,16 @@ public partial class MainViewModel : ObservableObject
         Log("設定画面を開きました");
     }
 
-    private async void OnAudioDataAvailable(object? sender, AudioDataEventArgs e)
+    private void OnAudioDataAvailable(object? sender, AudioDataEventArgs e)
     {
         try
         {
             if (!IsRunning || _processingCancellation == null || _processingCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (_segmentChannel == null)
             {
                 return;
             }
@@ -281,37 +296,18 @@ public partial class MainViewModel : ObservableObject
 
             foreach (var segment in segments)
             {
-                if (!IsRunning || _processingCancellation.IsCancellationRequested)
+                if (!IsRunning || _processingCancellation.IsCancellationRequested || _segmentChannel == null)
                 {
                     return;
                 }
 
-                // 低遅延ASR（仮字幕）
-                var fastResult = await _asrService.TranscribeFastAsync(segment);
-                if (!IsRunning || _processingCancellation.IsCancellationRequested)
-                {
-                    return;
-                }
-                ProcessingLatency = fastResult.ProcessingTimeMs;
+                var sequence = Interlocked.Increment(ref _segmentSequence);
+                var workItem = new SpeechSegmentWorkItem(sequence, segment);
 
-                if (!string.IsNullOrWhiteSpace(fastResult.Text))
+                if (!_segmentChannel.Writer.TryWrite(workItem))
                 {
-                    if (!IsRunning || _processingCancellation.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    var partialSubtitle = new SubtitleItem
-                    {
-                        SegmentId = segment.Id,
-                        OriginalText = fastResult.Text,
-                        IsFinal = false
-                    };
-                    _overlayViewModel.AddOrUpdateSubtitle(partialSubtitle);
-                    Log($"[仮] {fastResult.Text}");
+                    Log($"音声セグメントをキューに追加できないため破棄しました (ID: {segment.Id})");
                 }
-
-                // 高精度ASR（確定字幕）+ 翻訳
-                _ = ProcessAccurateAsync(segment, _processingCancellation.Token);
             }
         }
         catch (Exception ex)
@@ -320,56 +316,214 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private async Task ProcessAccurateAsync(SpeechSegment segment, CancellationToken token)
+    private void StartProcessingPipelines(CancellationToken token)
+    {
+        StopProcessingPipelines();
+
+        _segmentSequence = 0;
+        _segmentChannel = Channel.CreateUnbounded<SpeechSegmentWorkItem>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
+        _accurateChannel = Channel.CreateUnbounded<SpeechSegmentWorkItem>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true
+        });
+
+        _fastProcessingTask = Task.Run(() => ProcessFastQueueAsync(_segmentChannel.Reader, _accurateChannel.Writer, token), token);
+        _accurateProcessingTask = Task.Run(() => ProcessAccurateQueueAsync(_accurateChannel.Reader, token), token);
+    }
+
+    private void StopProcessingPipelines()
+    {
+        _segmentChannel?.Writer.TryComplete();
+        _accurateChannel?.Writer.TryComplete();
+        _segmentChannel = null;
+        _accurateChannel = null;
+        _fastProcessingTask = null;
+        _accurateProcessingTask = null;
+    }
+
+    private async Task ProcessFastQueueAsync(
+        ChannelReader<SpeechSegmentWorkItem> reader,
+        ChannelWriter<SpeechSegmentWorkItem> accurateWriter,
+        CancellationToken token)
     {
         try
         {
-            if (token.IsCancellationRequested || !IsRunning)
+            await foreach (var item in reader.ReadAllAsync(token))
             {
-                return;
+                if (token.IsCancellationRequested || !IsRunning)
+                {
+                    return;
+                }
+
+                var fastResult = await _asrService.TranscribeFastAsync(item.Segment);
+                if (token.IsCancellationRequested || !IsRunning)
+                {
+                    return;
+                }
+
+                ProcessingLatency = fastResult.ProcessingTimeMs;
+
+                if (!string.IsNullOrWhiteSpace(fastResult.Text))
+                {
+                    var partialSubtitle = new SubtitleItem
+                    {
+                        SegmentId = item.Segment.Id,
+                        OriginalText = fastResult.Text,
+                        IsFinal = false
+                    };
+                    _overlayViewModel.AddOrUpdateSubtitle(partialSubtitle);
+                    Log($"[仮] {fastResult.Text}");
+                }
+
+                try
+                {
+                    await accurateWriter.WriteAsync(item, token);
+                }
+                catch (ChannelClosedException)
+                {
+                    if (IsRunning && !token.IsCancellationRequested)
+                    {
+                        Log($"高精度キューが閉じられたためセグメントを破棄しました (ID: {item.Segment.Id})");
+                    }
+                }
             }
-
-            // 高精度ASR
-            var accurateResult = await _asrService.TranscribeAccurateAsync(segment);
-            if (token.IsCancellationRequested || !IsRunning)
-            {
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(accurateResult.Text))
-                return;
-
-            if (token.IsCancellationRequested || !IsRunning)
-            {
-                return;
-            }
-
-            // 翻訳
-            var sourceLanguage = _settings.Translation.SourceLanguage;
-            var targetLanguage = _settings.Translation.TargetLanguage;
-            var translationResult = await _translationService.TranslateAsync(accurateResult.Text, sourceLanguage, targetLanguage);
-            if (token.IsCancellationRequested || !IsRunning)
-            {
-                return;
-            }
-            TranslationLatency = translationResult.ProcessingTimeMs;
-
-            // 確定字幕を表示
-            var finalSubtitle = new SubtitleItem
-            {
-                SegmentId = segment.Id,
-                OriginalText = accurateResult.Text,
-                TranslatedText = translationResult.TranslatedText,
-                IsFinal = true
-            };
-            _overlayViewModel.AddOrUpdateSubtitle(finalSubtitle);
-            Log($"[確定] ({sourceLanguage}→{targetLanguage}) {accurateResult.Text} → {translationResult.TranslatedText}");
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            var sourceLanguage = _settings.Translation.SourceLanguage;
-            var targetLanguage = _settings.Translation.TargetLanguage;
-            Log($"翻訳エラー ({sourceLanguage}→{targetLanguage}): {ex.Message}");
+        }
+        finally
+        {
+            accurateWriter.TryComplete();
+        }
+    }
+
+    private async Task ProcessAccurateQueueAsync(ChannelReader<SpeechSegmentWorkItem> reader, CancellationToken token)
+    {
+        var semaphore = new SemaphoreSlim(MaxAccurateParallelism);
+        var pendingTasks = new List<Task>();
+        var buffer = new SortedDictionary<long, AccurateOutput>();
+        var bufferLock = new object();
+        var nextSequence = 1L;
+
+        void EnqueueOutput(AccurateOutput output)
+        {
+            lock (bufferLock)
+            {
+                buffer[output.Sequence] = output;
+
+                while (buffer.TryGetValue(nextSequence, out var next))
+                {
+                    buffer.Remove(nextSequence);
+                    if (next.TranslationLatencyMs.HasValue)
+                    {
+                        TranslationLatency = next.TranslationLatencyMs.Value;
+                    }
+
+                    if (next.Subtitle != null)
+                    {
+                        _overlayViewModel.AddOrUpdateSubtitle(next.Subtitle);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(next.LogMessage))
+                    {
+                        Log(next.LogMessage);
+                    }
+
+                    nextSequence++;
+                }
+            }
+        }
+
+        async Task HandleItemAsync(SpeechSegmentWorkItem item)
+        {
+            await semaphore.WaitAsync(token);
+            try
+            {
+                if (token.IsCancellationRequested || !IsRunning)
+                {
+                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
+                    return;
+                }
+
+                var accurateResult = await _asrService.TranscribeAccurateAsync(item.Segment);
+                if (token.IsCancellationRequested || !IsRunning)
+                {
+                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(accurateResult.Text))
+                {
+                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
+                    return;
+                }
+
+                var sourceLanguage = _settings.Translation.SourceLanguage;
+                var targetLanguage = _settings.Translation.TargetLanguage;
+                var translationResult = await _translationService.TranslateAsync(accurateResult.Text, sourceLanguage, targetLanguage);
+                if (token.IsCancellationRequested || !IsRunning)
+                {
+                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
+                    return;
+                }
+
+                var finalSubtitle = new SubtitleItem
+                {
+                    SegmentId = item.Segment.Id,
+                    OriginalText = accurateResult.Text,
+                    TranslatedText = translationResult.TranslatedText,
+                    IsFinal = true
+                };
+                var logMessage = $"[確定] ({sourceLanguage}→{targetLanguage}) {accurateResult.Text} → {translationResult.TranslatedText}";
+                EnqueueOutput(new AccurateOutput(item.Sequence, finalSubtitle, logMessage, translationResult.ProcessingTimeMs));
+            }
+            catch (Exception ex)
+            {
+                var sourceLanguage = _settings.Translation.SourceLanguage;
+                var targetLanguage = _settings.Translation.TargetLanguage;
+                var logMessage = $"翻訳エラー ({sourceLanguage}→{targetLanguage}): {ex.Message}";
+                EnqueueOutput(new AccurateOutput(item.Sequence, null, logMessage, null));
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        }
+
+        try
+        {
+            await foreach (var item in reader.ReadAllAsync(token))
+            {
+                if (token.IsCancellationRequested || !IsRunning)
+                {
+                    break;
+                }
+
+                var task = Task.Run(() => HandleItemAsync(item), token);
+                pendingTasks.Add(task);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            try
+            {
+                await Task.WhenAll(pendingTasks);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                semaphore.Dispose();
+            }
         }
     }
 
@@ -492,6 +646,14 @@ public partial class MainViewModel : ObservableObject
 
         return processIds;
     }
+
+    private sealed record SpeechSegmentWorkItem(long Sequence, SpeechSegment Segment);
+
+    private sealed record AccurateOutput(
+        long Sequence,
+        SubtitleItem? Subtitle,
+        string? LogMessage,
+        double? TranslationLatencyMs);
 }
 
 /// <summary>
