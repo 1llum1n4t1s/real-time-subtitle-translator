@@ -18,7 +18,7 @@ public class LocalTranslationService : ITranslationService
     private const string DefaultModelFileName = "translate-en_ja.argosmodel";
     private const string DefaultModelDownloadUrl = "https://www.argosopentech.com/argospm/translate-en_ja.argosmodel";
     private readonly TranslationSettings _settings;
-    private readonly ConcurrentDictionary<string, string> _cache = new();
+    private readonly LruCache<string, string> _cache;
     private Dictionary<string, string> _preTranslationDict = new();
     private Dictionary<string, string> _postTranslationDict = new();
     private readonly Dictionary<string, Regex> _compiledPreTranslationRegexes = new();
@@ -35,6 +35,7 @@ public class LocalTranslationService : ITranslationService
     public LocalTranslationService(TranslationSettings? settings = null)
     {
         _settings = settings ?? new TranslationSettings();
+        _cache = new LruCache<string, string>(_settings.CacheSize);
     }
 
     /// <summary>
@@ -116,7 +117,7 @@ public class LocalTranslationService : ITranslationService
 
         // キャッシュチェック
         string cacheKey = $"{sourceLanguage}:{targetLanguage}:{normalizedText}";
-        if (_cache.TryGetValue(cacheKey, out var cachedTranslation))
+        if (_cache.TryGet(cacheKey, out var cachedTranslation))
         {
             sw.Stop();
             return new TranslationResult
@@ -139,17 +140,8 @@ public class LocalTranslationService : ITranslationService
             // 翻訳後の補正
             translatedText = ApplyPostTranslation(translatedText);
 
-            // キャッシュに保存
-            if (_cache.Count >= _settings.CacheSize)
-            {
-                // 古いエントリを削除（簡易LRU）
-                var keysToRemove = _cache.Keys.Take(_cache.Count / 4).ToList();
-                foreach (var key in keysToRemove)
-                {
-                    _cache.TryRemove(key, out _);
-                }
-            }
-            _cache[cacheKey] = translatedText;
+            // キャッシュに保存（LRUキャッシュが自動的に古いエントリを削除）
+            _cache.Add(cacheKey, translatedText);
 
             sw.Stop();
             return new TranslationResult
@@ -428,4 +420,88 @@ public class LocalTranslationService : ITranslationService
     {
         ModelStatusChanged?.Invoke(this, args);
     }
+}
+
+/// <summary>
+/// スレッドセーフなLRUキャッシュ実装
+/// </summary>
+internal class LruCache<TKey, TValue> where TKey : notnull
+{
+    private readonly int _capacity;
+    private readonly Dictionary<TKey, LinkedListNode<CacheItem>> _cacheMap;
+    private readonly LinkedList<CacheItem> _lruList;
+    private readonly object _lock = new();
+
+    public LruCache(int capacity)
+    {
+        if (capacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than 0");
+        }
+
+        _capacity = capacity;
+        _cacheMap = new Dictionary<TKey, LinkedListNode<CacheItem>>(capacity);
+        _lruList = new LinkedList<CacheItem>();
+    }
+
+    public bool TryGet(TKey key, out TValue value)
+    {
+        lock (_lock)
+        {
+            if (_cacheMap.TryGetValue(key, out var node))
+            {
+                // ノードをリストの先頭に移動（最近使用されたマーク）
+                _lruList.Remove(node);
+                _lruList.AddFirst(node);
+                value = node.Value.Value;
+                return true;
+            }
+
+            value = default!;
+            return false;
+        }
+    }
+
+    public void Add(TKey key, TValue value)
+    {
+        lock (_lock)
+        {
+            if (_cacheMap.TryGetValue(key, out var existingNode))
+            {
+                // 既存のエントリを更新
+                _lruList.Remove(existingNode);
+                existingNode.Value = new CacheItem(key, value);
+                _lruList.AddFirst(existingNode);
+            }
+            else
+            {
+                // 容量を超えている場合、最も古いエントリを削除
+                if (_cacheMap.Count >= _capacity)
+                {
+                    var lastNode = _lruList.Last;
+                    if (lastNode != null)
+                    {
+                        _lruList.RemoveLast();
+                        _cacheMap.Remove(lastNode.Value.Key);
+                    }
+                }
+
+                // 新しいエントリを追加
+                var newNode = new LinkedListNode<CacheItem>(new CacheItem(key, value));
+                _lruList.AddFirst(newNode);
+                _cacheMap[key] = newNode;
+            }
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _cacheMap.Clear();
+            _lruList.Clear();
+        }
+    }
+
+    private record struct CacheItem(TKey Key, TValue Value);
 }
