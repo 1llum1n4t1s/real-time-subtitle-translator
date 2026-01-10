@@ -220,6 +220,11 @@ public partial class MainViewModel : ObservableObject
         _processingCancellation?.Cancel();
         _processingCancellation?.Dispose();
         _processingCancellation = null;
+        var pendingSegment = _vadService.FlushPendingSegment();
+        if (pendingSegment != null)
+        {
+            Log("停止に伴い残留発話を破棄しました");
+        }
         _audioCaptureService.StopCapture();
         _overlayViewModel.ClearSubtitles();
 
