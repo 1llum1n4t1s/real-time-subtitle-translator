@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using RealTimeTranslator.Core.Services;
@@ -340,7 +341,12 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
         return new WaveFormat((int)format.SampleRate, format.BitsPerSample, format.Channels);
     }
 
+    /// <summary>
+    /// Windows Core Audio API - プロセスオーディオインターフェースの非同期アクティベーション
+    /// Windows 10 Build 20348以降で利用可能なプロセスループバック機能に使用
+    /// </summary>
     [DllImport("Mmdevapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern int ActivateAudioInterfaceAsync(
         string deviceInterfacePath,
         ref Guid riid,

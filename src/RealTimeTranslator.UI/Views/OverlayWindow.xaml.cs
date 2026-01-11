@@ -8,26 +8,48 @@ namespace RealTimeTranslator.UI.Views;
 /// <summary>
 /// オーバーレイウィンドウ
 /// 透明・最前面・クリック透過対応
+/// WPFオーバーレイ字幕表示用のウィンドウクラス
 /// </summary>
 public partial class OverlayWindow : Window
 {
-    // Win32 API for click-through
-    private const int WS_EX_TRANSPARENT = 0x00000020;
-    private const int WS_EX_LAYERED = 0x00080000;
-    private const int GWL_EXSTYLE = -20;
+    #region Win32 API定義（クリック透過用）
+    // ウィンドウスタイル定数
+    private const int WS_EX_TRANSPARENT = 0x00000020;  // クリック透過
+    private const int WS_EX_LAYERED = 0x00080000;      // レイヤードウィンドウ
+    private const int GWL_EXSTYLE = -20;               // 拡張スタイル取得/設定用インデックス
 
-    // 32bit/64bit互換性のためのAPI呼び出し
+    /// <summary>
+    /// ウィンドウの拡張スタイルを取得（64bit版）
+    /// WPFオーバーレイのクリック透過設定に使用
+    /// </summary>
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
 
+    /// <summary>
+    /// ウィンドウの拡張スタイルを取得（32bit版）
+    /// WPFオーバーレイのクリック透過設定に使用
+    /// </summary>
     [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern IntPtr GetWindowLongPtr32(IntPtr hWnd, int nIndex);
 
+    /// <summary>
+    /// ウィンドウの拡張スタイルを設定（64bit版）
+    /// WPFオーバーレイのクリック透過設定に使用
+    /// </summary>
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
+    /// <summary>
+    /// ウィンドウの拡張スタイルを設定（32bit版）
+    /// WPFオーバーレイのクリック透過設定に使用
+    /// </summary>
     [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern IntPtr SetWindowLongPtr32(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    #endregion
 
     private static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex)
     {

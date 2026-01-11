@@ -5,6 +5,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+
+    <!-- アセンブリ情報（アンチウイルス誤検知対策） -->
+    <AssemblyName>RealTimeTranslator.Translation</AssemblyName>
+    <Product>Real-Time Subtitle Translator</Product>
+    <Description>リアルタイム字幕翻訳 - 翻訳エンジンライブラリ</Description>
+    <Company>RealTimeTranslator</Company>
+    <Copyright>Copyright © 2024 RealTimeTranslator. Licensed under MIT.</Copyright>
+
+    <!-- ビルド設定 -->
+    <Deterministic>true</Deterministic>
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>

@@ -5,11 +5,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+
+    <!-- アセンブリ情報（アンチウイルス誤検知対策） -->
+    <AssemblyName>RealTimeTranslator.Core</AssemblyName>
+    <Product>Real-Time Subtitle Translator</Product>
+    <Description>リアルタイム字幕翻訳 - コアライブラリ</Description>
+    <Company>RealTimeTranslator</Company>
+    <Copyright>Copyright © 2024 RealTimeTranslator. Licensed under MIT.</Copyright>
+
+    <!-- ビルド設定 -->
+    <Deterministic>true</Deterministic>
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="System.Management" Version="10.0.1" />
+    <!-- System.Management は未使用のため削除（アンチウイルス誤検知リスク軽減） -->
   </ItemGroup>
 
 </Project>

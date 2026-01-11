@@ -7,6 +7,27 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+
+    <!-- アセンブリ情報（アンチウイルス誤検知対策） -->
+    <AssemblyName>RealTimeTranslator</AssemblyName>
+    <Product>Real-Time Subtitle Translator</Product>
+    <AssemblyTitle>Real-Time Subtitle Translator</AssemblyTitle>
+    <Description>リアルタイム字幕翻訳アプリケーション - 音声認識と翻訳機能を提供</Description>
+    <Company>RealTimeTranslator</Company>
+    <Copyright>Copyright © 2024 RealTimeTranslator. Licensed under MIT.</Copyright>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+
+    <!-- ビルド設定（アンチウイルス誤検知対策） -->
+    <Deterministic>true</Deterministic>
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- アプリケーションマニフェスト -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
   </PropertyGroup>
 
   <ItemGroup>
