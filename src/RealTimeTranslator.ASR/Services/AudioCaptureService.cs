@@ -23,6 +23,7 @@ public class AudioCaptureService : IAudioCaptureService
     private const int BitsPerSample32 = 32;
     private const int RetryIntervalMs = 1000; // リトライ間隔（ミリ秒）
     private const int FileNotFoundHResult = unchecked((int)0x80070002);
+    private const int InvalidArgumentHResult = unchecked((int)0x80070057); // E_INVALIDARG
 
     private IWaveIn? _capture;
     private WaveFormat? _targetFormat;
@@ -103,6 +104,7 @@ public class AudioCaptureService : IAudioCaptureService
     /// <summary>
     /// 指定したプロセスIDの音声キャプチャを開始（オーディオセッションが見つかるまで待機）
     /// Chromeなどのマルチプロセスアプリの場合は、関連プロセスも試行
+    /// リモートオーディオデバイスの場合はデスクトップ全体のキャプチャにフォールバック
     /// </summary>
     public async Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken)
     {
@@ -114,6 +116,14 @@ public class AudioCaptureService : IAudioCaptureService
 
         _targetProcessId = processId;
         _audioBuffer.Clear();
+
+        // リモートオーディオデバイスの判定
+        var isRemoteAudio = IsRemoteAudioDevice();
+        if (isRemoteAudio)
+        {
+            LoggerService.LogInfo("StartCaptureWithRetryAsync: Remote audio device detected, using desktop loopback capture instead of process loopback");
+            return await StartDesktopCaptureAsync(cancellationToken);
+        }
 
         var retryCount = 0;
         var retryStopwatch = Stopwatch.StartNew();
@@ -151,6 +161,24 @@ public class AudioCaptureService : IAudioCaptureService
                     CleanupCapture();
                     // 次のプロセスを試す
                     continue;
+                }
+                catch (COMException ex) when (ex.HResult == InvalidArgumentHResult)
+                {
+                    // E_INVALIDARG: Process Loopbackが無効な引数を受けた
+                    // リモートオーディオまたはサポートされていないデバイスの可能性
+                    LoggerService.LogWarning($"StartCaptureWithRetryAsync: Process loopback not supported (E_INVALIDARG) for process {currentProcessId}, attempting fallback to desktop capture");
+                    CleanupCapture();
+                    // デスクトップ全体のキャプチャにフォールバック
+                    try
+                    {
+                        return await StartDesktopCaptureAsync(cancellationToken);
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        LoggerService.LogError($"StartCaptureWithRetryAsync: Desktop capture fallback failed: {fallbackEx.Message}");
+                        // フォールバックも失敗した場合は、次のプロセスを試す
+                        continue;
+                    }
                 }
                 catch (FileNotFoundException fex)
                 {
@@ -198,6 +226,90 @@ public class AudioCaptureService : IAudioCaptureService
 
         OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
         return false;
+    }
+
+    /// <summary>
+    /// リモートオーディオデバイスであるかを判定
+    /// Remote Desktop ConnectionやHyper-Vなどの仮想環境では Process Loopback が動作しない
+    /// </summary>
+    private static bool IsRemoteAudioDevice()
+    {
+        try
+        {
+            using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            var device = enumerator.GetDefaultAudioEndpoint(NAudio.CoreAudioApi.DataFlow.Render, NAudio.CoreAudioApi.Role.Multimedia);
+            var isRemote = device.FriendlyName.Contains("リモート", StringComparison.OrdinalIgnoreCase) ||
+                          device.FriendlyName.Contains("Remote", StringComparison.OrdinalIgnoreCase) ||
+                          device.FriendlyName.Contains("Stereo Mix", StringComparison.OrdinalIgnoreCase);
+            LoggerService.LogDebug($"IsRemoteAudioDevice: Device={device.FriendlyName}, IsRemote={isRemote}");
+            return isRemote;
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError($"IsRemoteAudioDevice: Failed to check device - {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// デスクトップ全体の音声をキャプチャ（Process Loopback のフォールバック）
+    /// </summary>
+    private async Task<bool> StartDesktopCaptureAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var retryCount = 0;
+            var maxRetries = 30; // 最大30秒間リトライ
+
+            while (retryCount < maxRetries && !cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                    var device = enumerator.GetDefaultAudioEndpoint(NAudio.CoreAudioApi.DataFlow.Render, NAudio.CoreAudioApi.Role.Multimedia);
+
+                    // WasapiLoopbackCapture でデスクトップ全体をキャプチャ
+                    _capture = new NAudio.Wave.WasapiLoopbackCapture(device);
+                    _capture.DataAvailable += OnDataAvailable;
+                    _capture.RecordingStopped += OnRecordingStopped;
+
+                    _capture.StartRecording();
+                    _isCapturing = true;
+
+                    OnCaptureStatusChanged("デスクトップ音声キャプチャを開始しました（リモートオーディオモード）。", false);
+                    LoggerService.LogInfo("StartDesktopCaptureAsync: Desktop audio capture started successfully");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        LoggerService.LogError($"StartDesktopCaptureAsync: Max retries exceeded - {ex.Message}");
+                        OnCaptureStatusChanged("デスクトップ音声キャプチャの開始に失敗しました。", false);
+                        return false;
+                    }
+
+                    LoggerService.LogDebug($"StartDesktopCaptureAsync: Retry {retryCount}/{maxRetries} - {ex.Message}");
+                    try
+                    {
+                        await Task.Delay(1000, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError($"StartDesktopCaptureAsync: Failed to start desktop capture - {ex.Message}");
+            OnCaptureStatusChanged("デスクトップ音声キャプチャの初期化に失敗しました。", false);
+            return false;
+        }
     }
 
     /// <summary>

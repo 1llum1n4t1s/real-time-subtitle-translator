@@ -30,7 +30,7 @@ public static class LoggerService
     /// <summary>
     /// ログファイルの最大行数
     /// </summary>
-    private const int MaxLogLines = 10000;
+    private const int MaxLogLines = 500;
 
     /// <summary>
     /// 最小ログレベル（これ以上のレベルのログのみ出力）
