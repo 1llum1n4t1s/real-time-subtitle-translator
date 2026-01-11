@@ -95,6 +95,9 @@ public class WhisperASRService : IASRService
             {
                 try
                 {
+                    var fileInfo = new FileInfo(fastModelPath);
+                    Debug.WriteLine($"Loading fast model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
+
                     _fastFactory = WhisperFactory.FromPath(fastModelPath);
                     var fastBuilder = _fastFactory.CreateBuilder()
                         .WithLanguage(_settings.Language)
@@ -109,22 +112,33 @@ public class WhisperASRService : IASRService
                 }
                 catch (Exception ex)
                 {
+                    var errorMsg = $"高速ASRモデルの読み込みに失敗しました: {ex.Message}";
+                    var debugMsg = $"Failed to load fast ASR model from {fastModelPath}: {ex.Message}";
+                    if (ex.InnerException != null)
+                    {
+                        debugMsg += $"\n  InnerException: {ex.InnerException.Message}";
+                    }
                     OnModelStatusChanged(new ModelStatusChangedEventArgs(
                         ServiceName,
                         FastModelLabel,
                         ModelStatusType.LoadFailed,
-                        $"高速ASRモデルの読み込みに失敗しました: {ex.Message}",
+                        errorMsg,
                         ex));
-                    Debug.WriteLine($"Failed to load fast ASR model: {ex}");
+                    Debug.WriteLine(debugMsg);
+                    Debug.WriteLine($"StackTrace: {ex.StackTrace}");
                 }
             }
             else
             {
+                var pathStatus = string.IsNullOrWhiteSpace(fastModelPath) ? "未設定" :
+                                  File.Exists(fastModelPath) ? "存在" : "不存在";
+                var errorMsg = $"高速ASRモデルが見つかりません: {fastModelPath} ({pathStatus})";
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     FastModelLabel,
                     ModelStatusType.LoadFailed,
-                    "高速ASRモデルが見つかりません: " + fastModelPath));
+                    errorMsg));
+                Debug.WriteLine($"Fast model not found. Path: {fastModelPath}, Status: {pathStatus}");
             }
 
             // 高精度モデル（large系）の初期化
@@ -132,6 +146,9 @@ public class WhisperASRService : IASRService
             {
                 try
                 {
+                    var fileInfo = new FileInfo(accurateModelPath);
+                    Debug.WriteLine($"Loading accurate model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
+
                     _accurateFactory = WhisperFactory.FromPath(accurateModelPath);
                     var builder = _accurateFactory.CreateBuilder()
                         .WithLanguage(_settings.Language)
@@ -149,22 +166,33 @@ public class WhisperASRService : IASRService
                 }
                 catch (Exception ex)
                 {
+                    var errorMsg = $"高精度ASRモデルの読み込みに失敗しました: {ex.Message}";
+                    var debugMsg = $"Failed to load accurate ASR model from {accurateModelPath}: {ex.Message}";
+                    if (ex.InnerException != null)
+                    {
+                        debugMsg += $"\n  InnerException: {ex.InnerException.Message}";
+                    }
                     OnModelStatusChanged(new ModelStatusChangedEventArgs(
                         ServiceName,
                         AccurateModelLabel,
                         ModelStatusType.LoadFailed,
-                        $"高精度ASRモデルの読み込みに失敗しました: {ex.Message}",
+                        errorMsg,
                         ex));
-                    Debug.WriteLine($"Failed to load accurate ASR model: {ex}");
+                    Debug.WriteLine(debugMsg);
+                    Debug.WriteLine($"StackTrace: {ex.StackTrace}");
                 }
             }
             else
             {
+                var pathStatus = string.IsNullOrWhiteSpace(accurateModelPath) ? "未設定" :
+                                  File.Exists(accurateModelPath) ? "存在" : "不存在";
+                var errorMsg = $"高精度ASRモデルが見つかりません: {accurateModelPath} ({pathStatus})";
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     AccurateModelLabel,
                     ModelStatusType.LoadFailed,
-                    "高精度ASRモデルが見つかりません: " + accurateModelPath));
+                    errorMsg));
+                Debug.WriteLine($"Accurate model not found. Path: {accurateModelPath}, Status: {pathStatus}");
             }
 
             _isModelLoaded = _fastProcessor != null || _accurateProcessor != null;
