@@ -101,6 +101,7 @@ public class AudioCaptureService : IAudioCaptureService
 
     /// <summary>
     /// 指定したプロセスIDの音声キャプチャを開始（オーディオセッションが見つかるまで待機）
+    /// Chromeなどのマルチプロセスアプリの場合は、関連プロセスも試行
     /// </summary>
     public async Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken)
     {
@@ -115,104 +116,145 @@ public class AudioCaptureService : IAudioCaptureService
 
         var retryCount = 0;
         var retryStopwatch = Stopwatch.StartNew();
+        var processesToTry = GetProcessesToTry(processId);
+
+        Debug.WriteLine($"StartCaptureWithRetryAsync: Will try {processesToTry.Count} process(es): {string.Join(", ", processesToTry)}");
+
         while (!cancellationToken.IsCancellationRequested)
         {
+            // 複数プロセスを順番に試す
+            foreach (var currentProcessId in processesToTry)
+            {
+                try
+                {
+                    // Windows Core Audio API(AudioClientActivationParams/IAudioClient3)で対象プロセスのみを初期化する
+                    _capture = new ProcessLoopbackCapture(currentProcessId);
+                    _capture.DataAvailable += OnDataAvailable;
+                    _capture.RecordingStopped += OnRecordingStopped;
+
+                    _capture.StartRecording();
+                    _isCapturing = true;
+                    _targetProcessId = currentProcessId; // 成功したプロセスIDを記録
+
+                    var message = currentProcessId == processId
+                        ? "音声キャプチャを開始しました。"
+                        : $"音声キャプチャを開始しました。(PID: {currentProcessId})";
+                    OnCaptureStatusChanged(message, false);
+                    Debug.WriteLine($"StartCaptureWithRetryAsync: Successfully started capture for process {currentProcessId}");
+                    return true;
+                }
+                catch (COMException ex) when (ex.HResult == FileNotFoundHResult)
+                {
+                    // このプロセスではオーディオセッションが見つからない
+                    Debug.WriteLine($"StartCaptureWithRetryAsync: Audio session not found (HRESULT 0x80070002) for process {currentProcessId}");
+                    CleanupCapture();
+                    // 次のプロセスを試す
+                    continue;
+                }
+                catch (FileNotFoundException fex)
+                {
+                    // このプロセスではオーディオセッションが見つからない
+                    Debug.WriteLine($"StartCaptureWithRetryAsync: FileNotFoundException for process {currentProcessId}: {fex.Message}");
+                    CleanupCapture();
+                    // 次のプロセスを試す
+                    continue;
+                }
+                catch (TimeoutException tex)
+                {
+                    // このプロセスではタイムアウト
+                    Debug.WriteLine($"StartCaptureWithRetryAsync: Activation timeout for process {currentProcessId}: {tex.Message}");
+                    CleanupCapture();
+                    // 次のプロセスを試す
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    // その他のエラー
+                    Debug.WriteLine($"StartCaptureWithRetryAsync: Error for process {currentProcessId} - {ex.GetType().Name}: {ex.Message}");
+                    CleanupCapture();
+                    // 次のプロセスを試す
+                    continue;
+                }
+            }
+
+            // 全プロセスを試したが失敗
+            retryCount++;
+            var elapsedSeconds = Math.Round(retryStopwatch.Elapsed.TotalSeconds, 1);
+            var statusMessage = $"音声の再生を待機中... ({elapsedSeconds}秒, 試行: {retryCount})";
+            OnCaptureStatusChanged(statusMessage, true);
+            Debug.WriteLine($"StartCaptureWithRetryAsync: No audio session found in any process, waiting... (attempt {retryCount}, elapsed {elapsedSeconds}s)");
+
             try
             {
-                // Windows Core Audio API(AudioClientActivationParams/IAudioClient3)で対象プロセスのみを初期化する
-                _capture = new ProcessLoopbackCapture(_targetProcessId);
-                _capture.DataAvailable += OnDataAvailable;
-                _capture.RecordingStopped += OnRecordingStopped;
-
-                _capture.StartRecording();
-                _isCapturing = true;
-
-                OnCaptureStatusChanged("音声キャプチャを開始しました。", false);
-                Debug.WriteLine($"StartCaptureWithRetryAsync: Successfully started capture for process {processId}");
-                return true;
+                await Task.Delay(RetryIntervalMs, cancellationToken);
             }
-            catch (COMException ex) when (ex.HResult == FileNotFoundHResult)
+            catch (OperationCanceledException)
             {
-                // オーディオセッションが見つからない場合は待機して再試行
-                retryCount++;
-                var elapsedSeconds = Math.Round(retryStopwatch.Elapsed.TotalSeconds, 1);
-                var message = $"音声の再生を待機中... ({elapsedSeconds}秒)";
-                OnCaptureStatusChanged(message, true);
-                Debug.WriteLine($"StartCaptureWithRetryAsync: Audio session not found (HRESULT 0x80070002) for process {processId}, waiting... (attempt {retryCount}, elapsed {elapsedSeconds}s)");
-
-                // キャプチャオブジェクトをクリーンアップ
-                CleanupCapture();
-
-                try
-                {
-                    await Task.Delay(RetryIntervalMs, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
-                    return false;
-                }
-            }
-            catch (FileNotFoundException fex)
-            {
-                // FileNotFoundExceptionもキャッチ（HRESULT 0x80070002）
-                retryCount++;
-                var elapsedSeconds = Math.Round(retryStopwatch.Elapsed.TotalSeconds, 1);
-                var message = $"音声の再生を待機中... ({elapsedSeconds}秒)";
-                OnCaptureStatusChanged(message, true);
-                Debug.WriteLine($"StartCaptureWithRetryAsync: FileNotFoundException for process {processId}: {fex.Message}, waiting... (attempt {retryCount}, elapsed {elapsedSeconds}s)");
-
-                // キャプチャオブジェクトをクリーンアップ
-                CleanupCapture();
-
-                try
-                {
-                    await Task.Delay(RetryIntervalMs, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
-                    return false;
-                }
-
-                continue;
-            }
-            catch (TimeoutException tex)
-            {
-                // オーディオインターフェース激活タイムアウト
-                retryCount++;
-                var elapsedSeconds = Math.Round(retryStopwatch.Elapsed.TotalSeconds, 1);
-                var message = $"音声の再生を待機中... ({elapsedSeconds}秒)";
-                OnCaptureStatusChanged(message, true);
-                Debug.WriteLine($"StartCaptureWithRetryAsync: Activation timeout for process {processId}: {tex.Message}, waiting... (attempt {retryCount}, elapsed {elapsedSeconds}s)");
-
-                // キャプチャオブジェクトをクリーンアップ
-                CleanupCapture();
-
-                try
-                {
-                    await Task.Delay(RetryIntervalMs, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
-                    return false;
-                }
-
-                continue;
-            }
-            catch (Exception ex)
-            {
-                // その他のエラーは再スロー
-                Debug.WriteLine($"StartCaptureWithRetryAsync: Unexpected error - {ex.GetType().Name}: {ex.Message}");
-                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-                CleanupCapture();
-                throw;
+                OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
+                return false;
             }
         }
 
         OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
         return false;
+    }
+
+    /// <summary>
+    /// 試行対象のプロセスIDリストを取得
+    /// メインプロセスに加え、子プロセス（Chromeのレンダラープロセスなど）も含める
+    /// </summary>
+    private static List<int> GetProcessesToTry(int mainProcessId)
+    {
+        var processesToTry = new List<int> { mainProcessId };
+
+        try
+        {
+            var mainProcess = Process.GetProcessById(mainProcessId);
+            var parentPid = GetParentProcessId(mainProcessId);
+
+            // 親プロセスが存在する場合、親プロセスのIDも追加（マルチプロセスアプリの場合）
+            if (parentPid > 0 && parentPid != mainProcessId)
+            {
+                processesToTry.Insert(0, parentPid);
+                Debug.WriteLine($"GetProcessesToTry: Found parent process {parentPid}");
+            }
+
+            // 同じプロセス名の他のプロセスも追加（Chromeの複数インスタンスなど）
+            try
+            {
+                var relatedProcesses = Process.GetProcessesByName(mainProcess.ProcessName)
+                    .Where(p => p.Id != mainProcessId && !processesToTry.Contains(p.Id))
+                    .OrderBy(p => p.Id)
+                    .Select(p => p.Id)
+                    .ToList();
+
+                if (relatedProcesses.Count > 0)
+                {
+                    processesToTry.AddRange(relatedProcesses);
+                    Debug.WriteLine($"GetProcessesToTry: Found {relatedProcesses.Count} related processes: {string.Join(", ", relatedProcesses)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"GetProcessesToTry: Error getting related processes: {ex.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"GetProcessesToTry: Error - {ex.Message}");
+        }
+
+        return processesToTry;
+    }
+
+    /// <summary>
+    /// 親プロセスIDを取得（現在は未実装、常に0を返す）
+    /// </summary>
+    private static int GetParentProcessId(int processId)
+    {
+        // 親プロセス取得はWMI等で複雑なため、現在は未実装
+        // 今後、必要に応じて実装可能
+        return 0;
     }
 
     /// <summary>
