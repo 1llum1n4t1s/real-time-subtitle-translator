@@ -122,20 +122,48 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        System.Diagnostics.Debug.WriteLine("OnExit: アプリケーション終了開始");
+
+        // 更新サービスをキャンセル
         _updateCancellation?.Cancel();
         _updateCancellation?.Dispose();
-        _overlayWindow?.Close();
+        System.Diagnostics.Debug.WriteLine("OnExit: 更新サービス停止");
+
+        // オーバーレイウィンドウを閉じる
+        if (_overlayWindow != null)
+        {
+            _overlayWindow.Close();
+            _overlayWindow = null;
+        }
+        System.Diagnostics.Debug.WriteLine("OnExit: オーバーレイウィンドウ終了");
 
         // サービスとViewModelを適切に破棄
         if (_serviceProvider != null)
         {
-            // MainViewModelのDispose（イベントハンドラ登録解除）
+            // MainViewModelのDispose（イベントハンドラ登録解除、キャプチャ停止）
             var mainViewModel = _serviceProvider.GetService<MainViewModel>();
             mainViewModel?.Dispose();
+            System.Diagnostics.Debug.WriteLine("OnExit: MainViewModel Dispose完了");
 
             // OverlayViewModelのDispose
             var overlayViewModel = _serviceProvider.GetService<OverlayViewModel>();
             overlayViewModel?.Dispose();
+            System.Diagnostics.Debug.WriteLine("OnExit: OverlayViewModel Dispose完了");
+
+            // 音声キャプチャサービスをDispose
+            var audioCaptureService = _serviceProvider.GetService<IAudioCaptureService>();
+            audioCaptureService?.Dispose();
+            System.Diagnostics.Debug.WriteLine("OnExit: AudioCaptureService Dispose完了");
+
+            // ASRサービスをDispose
+            var asrService = _serviceProvider.GetService<IASRService>();
+            asrService?.Dispose();
+            System.Diagnostics.Debug.WriteLine("OnExit: ASRService Dispose完了");
+
+            // 翻訳サービスをDispose
+            var translationService = _serviceProvider.GetService<ITranslationService>();
+            translationService?.Dispose();
+            System.Diagnostics.Debug.WriteLine("OnExit: TranslationService Dispose完了");
 
             // HttpClientとModelDownloadServiceを適切に破棄
             var httpClient = _serviceProvider.GetService<HttpClient>();
@@ -143,10 +171,14 @@ public partial class App : Application
 
             var downloadService = _serviceProvider.GetService<ModelDownloadService>();
             downloadService?.Dispose();
+            System.Diagnostics.Debug.WriteLine("OnExit: DownloadService Dispose完了");
 
             _serviceProvider.Dispose();
+            _serviceProvider = null;
+            System.Diagnostics.Debug.WriteLine("OnExit: ServiceProvider Dispose完了");
         }
 
+        System.Diagnostics.Debug.WriteLine("OnExit: アプリケーション終了完了");
         base.OnExit(e);
     }
 }

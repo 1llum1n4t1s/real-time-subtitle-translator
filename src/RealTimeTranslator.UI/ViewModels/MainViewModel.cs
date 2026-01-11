@@ -972,6 +972,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 開始");
+
+        // 音声キャプチャを停止
+        try
+        {
+            _audioCaptureService.StopCapture();
+            System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 音声キャプチャ停止完了");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"MainViewModel.Dispose: 音声キャプチャ停止エラー: {ex.Message}");
+        }
+
+        // 処理パイプラインの停止
+        _processingCancellation?.Cancel();
+        _processingCancellation?.Dispose();
+        _processingCancellation = null;
+        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 処理パイプライン停止完了");
+
         // イベントハンドラの登録解除
         _audioCaptureService.AudioDataAvailable -= OnAudioDataAvailable;
         _audioCaptureService.CaptureStatusChanged -= OnCaptureStatusChanged;
@@ -983,13 +1002,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _updateService.StatusChanged -= OnUpdateStatusChanged;
         _updateService.UpdateAvailable -= OnUpdateAvailable;
         _updateService.UpdateReady -= OnUpdateReady;
-
-        // 処理パイプラインの停止
-        _processingCancellation?.Cancel();
-        _processingCancellation?.Dispose();
+        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: イベントハンドラ解除完了");
 
         _disposed = true;
         GC.SuppressFinalize(this);
+        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 完了");
     }
 }
 
