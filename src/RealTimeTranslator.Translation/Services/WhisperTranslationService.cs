@@ -22,6 +22,7 @@ public class WhisperTranslationService : ITranslationService
 
     private readonly TranslationSettings _settings;
     private readonly ModelDownloadService _downloadService;
+    private readonly HttpClient _httpClient;
     private readonly Dictionary<string, string> _cache = new();
     private readonly LinkedList<string> _cacheOrder = new();
     private readonly object _cacheLock = new();
@@ -42,10 +43,11 @@ public class WhisperTranslationService : ITranslationService
     public event EventHandler<ModelDownloadProgressEventArgs>? ModelDownloadProgress;
     public event EventHandler<ModelStatusChangedEventArgs>? ModelStatusChanged;
 
-    public WhisperTranslationService(TranslationSettings settings, ModelDownloadService downloadService)
+    public WhisperTranslationService(TranslationSettings settings, ModelDownloadService downloadService, HttpClient httpClient)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _downloadService = downloadService ?? throw new ArgumentNullException(nameof(downloadService));
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
 
         _downloadService.DownloadProgress += (sender, e) => ModelDownloadProgress?.Invoke(this, e);
         _downloadService.StatusChanged += (sender, e) => ModelStatusChanged?.Invoke(this, e);
@@ -146,16 +148,21 @@ public class WhisperTranslationService : ITranslationService
             var preprocessedText = ApplyPreTranslation(text);
             LogDebug($"[TranslateAsync] 翻訳開始: Text={preprocessedText}, Source={sourceLanguage}, Target={targetLanguage}");
 
-            // 注：Whisper.net は音声認識のみで、テキスト翻訳機能がありません
-            // 翻訳は TranslateAudioAsync 内で別途実装する必要があります
-            // ここではユーザー定義の翻訳辞書のみを適用
-            var translatedText = preprocessedText;
-            translatedText = ApplyPostTranslation(translatedText);
+            // MyMemory Translation API を使用（無料、認証不要）
+            string translatedText;
+            if (sourceLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase))
+            {
+                translatedText = preprocessedText;
+            }
+            else
+            {
+                translatedText = await TranslateWithMyMemoryAsync(preprocessedText, sourceLanguage, targetLanguage);
+            }
 
+            translatedText = ApplyPostTranslation(translatedText);
             AddToCache(cacheKey, translatedText);
 
             sw.Stop();
-            LoggerService.LogWarning($"[TranslateAsync] テキスト翻訳：外部翻訳サービスが設定されていません。辞書ベースのみ");
             LogDebug($"[TranslateAsync] テキスト翻訳完了: Result={translatedText}, Time={sw.ElapsedMilliseconds}ms");
 
             return new TranslationResult
@@ -305,6 +312,10 @@ public class WhisperTranslationService : ITranslationService
                 throw new FileNotFoundException($"Translation model not found: {modelPath}");
             }
 
+            // GPU を有効にするための環境変数設定（CUDA）
+            Environment.SetEnvironmentVariable("GGML_USE_CUDA", "1");
+            LoggerService.LogDebug("GPU (CUDA) support enabled");
+
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
                 ModelLabel,
@@ -325,7 +336,7 @@ public class WhisperTranslationService : ITranslationService
 
             _processor = builder.Build();
             
-            LoggerService.LogDebug("Whisper Processor created (ASR mode, no translation)");
+            LoggerService.LogDebug("Whisper Processor created with GPU support (CUDA)");
 
             _isModelLoaded = true;
             LoggerService.LogInfo("Whisper翻訳モデルの読み込みが完了しました");
@@ -346,6 +357,56 @@ public class WhisperTranslationService : ITranslationService
                 "翻訳モデルの読み込みに失敗しました。",
                 ex));
             _isModelLoaded = false;
+        }
+    }
+
+    private async Task<string> TranslateWithMyMemoryAsync(string text, string sourceLanguage, string targetLanguage)
+    {
+        try
+        {
+            // MyMemory Translation API のエンドポイント
+            const string baseUrl = "https://api.mymemory.translated.net/get";
+            
+            // 言語コードを標準化（en, ja など）
+            var sourceLang = sourceLanguage.Split('-')[0].ToLower();
+            var targetLang = targetLanguage.Split('-')[0].ToLower();
+            
+            var url = $"{baseUrl}?q={Uri.EscapeDataString(text)}&langpair={sourceLang}|{targetLang}";
+            
+            LogDebug($"[TranslateWithMyMemoryAsync] MyMemory API呼び出し: {sourceLang}→{targetLang}");
+            
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                LogError($"[TranslateWithMyMemoryAsync] MyMemory API エラー: {response.StatusCode}");
+                return text; // 失敗時は元のテキストを返す
+            }
+
+            var jsonContent = await response.Content.ReadAsStringAsync();
+            LogDebug($"[TranslateWithMyMemoryAsync] API応答: {jsonContent}");
+            
+            // JSON をパース（簡易的な方法）
+            if (jsonContent.Contains("\"translatedText\":"))
+            {
+                var startIdx = jsonContent.IndexOf("\"translatedText\":\"") + "\"translatedText\":\"".Length;
+                var endIdx = jsonContent.IndexOf("\"", startIdx);
+                if (startIdx > 0 && endIdx > startIdx)
+                {
+                    var translated = jsonContent.Substring(startIdx, endIdx - startIdx);
+                    // JSON エスケープを解除
+                    translated = translated.Replace("\\\"", "\"").Replace("\\\\", "\\").Replace("\\/", "/");
+                    LogDebug($"[TranslateWithMyMemoryAsync] 翻訳結果: {translated}");
+                    return translated;
+                }
+            }
+
+            LogWarning($"[TranslateWithMyMemoryAsync] 翻訳結果をパースできません");
+            return text;
+        }
+        catch (Exception ex)
+        {
+            LogError($"[TranslateWithMyMemoryAsync] エラー: {ex.Message}");
+            return text; // 例外時は元のテキストを返す
         }
     }
 
