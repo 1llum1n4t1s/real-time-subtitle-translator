@@ -85,7 +85,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel(
         IAudioCaptureService audioCaptureService,
         IVADService vadService,
-        IASRService asrService,
         ITranslationService translationService,
         OverlayViewModel overlayViewModel,
         AppSettings settings,
@@ -96,7 +95,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _audioCaptureService = audioCaptureService;
         _vadService = vadService;
-        _asrService = asrService;
+        _asrService = null!;
         _translationService = translationService;
         _overlayViewModel = overlayViewModel;
         _settings = settings;
@@ -109,8 +108,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _audioCaptureService.AudioDataAvailable += OnAudioDataAvailable;
         _audioCaptureService.CaptureStatusChanged += OnCaptureStatusChanged;
         _settingsViewModel.SettingsSaved += OnSettingsSaved;
-        _asrService.ModelDownloadProgress += OnModelDownloadProgress;
-        _asrService.ModelStatusChanged += OnModelStatusChanged;
         _translationService.ModelDownloadProgress += OnModelDownloadProgress;
         _translationService.ModelStatusChanged += OnModelStatusChanged;
         _updateService.StatusChanged += OnUpdateStatusChanged;

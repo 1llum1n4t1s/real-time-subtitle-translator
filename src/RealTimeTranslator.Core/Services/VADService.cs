@@ -1,7 +1,7 @@
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
 
-namespace RealTimeTranslator.ASR.Services;
+namespace RealTimeTranslator.Core.Services;
 
 /// <summary>
 /// VAD（Voice Activity Detection）サービス

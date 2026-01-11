@@ -3,7 +3,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using RealTimeTranslator.Core.Services;
 
-namespace RealTimeTranslator.ASR.Services;
+namespace RealTimeTranslator.Core.Services;
 
 /// <summary>
 /// AudioClientActivationParams を用いたプロセス単位のループバックキャプチャ

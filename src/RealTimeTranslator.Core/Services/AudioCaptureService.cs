@@ -5,7 +5,7 @@ using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
 using RealTimeTranslator.Core.Services;
 
-namespace RealTimeTranslator.ASR.Services;
+namespace RealTimeTranslator.Core.Services;
 
 /// <summary>
 /// 音声キャプチャサービス

@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
-using RealTimeTranslator.ASR.Services;
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
 using RealTimeTranslator.Core.Services;
@@ -153,11 +152,6 @@ public partial class App : Application
             var audioCaptureService = _serviceProvider.GetService<IAudioCaptureService>();
             audioCaptureService?.Dispose();
             LoggerService.LogInfo("OnExit: AudioCaptureService Dispose完了");
-
-            // ASRサービスをDispose
-            var asrService = _serviceProvider.GetService<IASRService>();
-            asrService?.Dispose();
-            LoggerService.LogInfo("OnExit: ASRService Dispose完了");
 
             // 翻訳サービスをDispose
             var translationService = _serviceProvider.GetService<ITranslationService>();
