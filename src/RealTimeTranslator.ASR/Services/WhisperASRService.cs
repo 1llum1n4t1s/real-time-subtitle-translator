@@ -67,20 +67,20 @@ public class WhisperASRService : IASRService
                 ModelStatusType.Info,
                 "ASRモデルの初期化を開始しました。"));
 
-            Debug.WriteLine("InitializeAsync: モデル確認開始");
+            LoggerService.LogDebug("InitializeAsync: モデル確認開始");
             var fastModelPath = await EnsureModelAsync(
                 _settings.FastModelPath,
                 DefaultFastModelFileName,
                 DefaultFastModelDownloadUrl,
                 FastModelLabel);
-            Debug.WriteLine($"InitializeAsync: 高速モデルパス={fastModelPath}");
+            LoggerService.LogDebug($"InitializeAsync: 高速モデルパス={fastModelPath}");
 
             var accurateModelPath = await EnsureModelAsync(
                 _settings.AccurateModelPath,
                 DefaultAccurateModelFileName,
                 DefaultAccurateModelDownloadUrl,
                 AccurateModelLabel);
-            Debug.WriteLine($"InitializeAsync: 高精度モデルパス={accurateModelPath}");
+            LoggerService.LogDebug($"InitializeAsync: 高精度モデルパス={accurateModelPath}");
 
             await Task.Run(() =>
             {
@@ -97,24 +97,24 @@ public class WhisperASRService : IASRService
                 try
                 {
                     var fileInfo = new FileInfo(fastModelPath);
-                    Debug.WriteLine($"Loading fast model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
+                    LoggerService.LogDebug($"Loading fast model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
 
-                    Debug.WriteLine($"Creating WhisperFactory from path: {fastModelPath}");
+                    LoggerService.LogDebug($"Creating WhisperFactory from path: {fastModelPath}");
                     _fastFactory = WhisperFactory.FromPath(fastModelPath);
-                    Debug.WriteLine($"WhisperFactory created successfully");
+                    LoggerService.LogDebug($"WhisperFactory created successfully");
 
-                    Debug.WriteLine($"Creating builder from factory");
+                    LoggerService.LogDebug($"Creating builder from factory");
                     var fastBuilder = _fastFactory.CreateBuilder();
-                    Debug.WriteLine($"Builder created successfully");
+                    LoggerService.LogDebug($"Builder created successfully");
 
-                    Debug.WriteLine($"Configuring builder: Language={_settings.Language}, Threads=4");
+                    LoggerService.LogDebug($"Configuring builder: Language={_settings.Language}, Threads=4");
                     fastBuilder = fastBuilder
                         .WithLanguage(_settings.Language)
                         .WithThreads(4);
                     ConfigurePromptAndHotwords(fastBuilder);
-                    Debug.WriteLine($"Building processor");
+                    LoggerService.LogDebug($"Building processor");
                     _fastProcessor = fastBuilder.Build();
-                    Debug.WriteLine($"Processor built successfully");
+                    LoggerService.LogDebug($"Processor built successfully");
                     OnModelStatusChanged(new ModelStatusChangedEventArgs(
                         ServiceName,
                         FastModelLabel,
@@ -139,8 +139,7 @@ public class WhisperASRService : IASRService
                         ModelStatusType.LoadFailed,
                         errorMsg,
                         ex));
-                    Debug.WriteLine(debugMsg);
-                    Debug.WriteLine($"StackTrace: {ex.StackTrace}");
+                    LoggerService.LogException(errorMsg, ex);
                 }
             }
             else
@@ -153,7 +152,7 @@ public class WhisperASRService : IASRService
                     FastModelLabel,
                     ModelStatusType.LoadFailed,
                     errorMsg));
-                Debug.WriteLine($"Fast model not found. Path: {fastModelPath}, Status: {pathStatus}");
+                LoggerService.LogWarning($"Fast model not found. Path: {fastModelPath}, Status: {pathStatus}");
             }
 
             // 高精度モデル（large系）の初期化
@@ -162,17 +161,17 @@ public class WhisperASRService : IASRService
                 try
                 {
                     var fileInfo = new FileInfo(accurateModelPath);
-                    Debug.WriteLine($"Loading accurate model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
+                    LoggerService.LogDebug($"Loading accurate model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
 
                     Debug.WriteLine($"Creating WhisperFactory from path: {accurateModelPath}");
                     _accurateFactory = WhisperFactory.FromPath(accurateModelPath);
-                    Debug.WriteLine($"WhisperFactory created successfully");
+                    LoggerService.LogDebug($"WhisperFactory created successfully");
 
-                    Debug.WriteLine($"Creating builder from factory");
+                    LoggerService.LogDebug($"Creating builder from factory");
                     var builder = _accurateFactory.CreateBuilder();
-                    Debug.WriteLine($"Builder created successfully");
+                    LoggerService.LogDebug($"Builder created successfully");
 
-                    Debug.WriteLine($"Configuring builder: Language={_settings.Language}, Threads=4");
+                    LoggerService.LogDebug($"Configuring builder: Language={_settings.Language}, Threads=4");
                     builder = builder
                         .WithLanguage(_settings.Language)
                         .WithThreads(4);
@@ -180,9 +179,9 @@ public class WhisperASRService : IASRService
                     ApplyBeamSearchSettings(builder);
 
                     ConfigurePromptAndHotwords(builder);
-                    Debug.WriteLine($"Building processor");
+                    LoggerService.LogDebug($"Building processor");
                     _accurateProcessor = builder.Build();
-                    Debug.WriteLine($"Processor built successfully");
+                    LoggerService.LogDebug($"Processor built successfully");
                     OnModelStatusChanged(new ModelStatusChangedEventArgs(
                         ServiceName,
                         AccurateModelLabel,
@@ -207,8 +206,7 @@ public class WhisperASRService : IASRService
                         ModelStatusType.LoadFailed,
                         errorMsg,
                         ex));
-                    Debug.WriteLine(debugMsg);
-                    Debug.WriteLine($"StackTrace: {ex.StackTrace}");
+                    LoggerService.LogException(errorMsg, ex);
                 }
             }
             else
@@ -221,7 +219,7 @@ public class WhisperASRService : IASRService
                     AccurateModelLabel,
                     ModelStatusType.LoadFailed,
                     errorMsg));
-                Debug.WriteLine($"Accurate model not found. Path: {accurateModelPath}, Status: {pathStatus}");
+                LoggerService.LogWarning($"Accurate model not found. Path: {accurateModelPath}, Status: {pathStatus}");
             }
 
             _isModelLoaded = _fastProcessor != null || _accurateProcessor != null;
@@ -244,7 +242,7 @@ public class WhisperASRService : IASRService
                 ModelStatusType.LoadFailed,
                 $"ASR初期化エラー: {ex.Message}",
                 ex));
-            Debug.WriteLine($"InitializeAsync error: {ex}");
+            LoggerService.LogError($"InitializeAsync error: {ex}");
             _isModelLoaded = false;
         }
     }
@@ -347,9 +345,7 @@ public class WhisperASRService : IASRService
         }
         catch (FileNotFoundException ex)
         {
-            Debug.WriteLine($"ProcessAudioAsync: FileNotFoundException - {ex.FileName}");
-            Debug.WriteLine($"ProcessAudioAsync: Message - {ex.Message}");
-            Debug.WriteLine($"ProcessAudioAsync: StackTrace - {ex.StackTrace}");
+            LoggerService.LogException("ProcessAudioAsync: FileNotFoundException", ex);
             throw;
         }
 
@@ -379,7 +375,7 @@ public class WhisperASRService : IASRService
         // 自動検出モードの場合、GPU種別を検出
         if (_settings.GPU.Type == GPUType.Auto || _settings.GPU.Enabled)
         {
-            Debug.WriteLine("ConfigureGpuRuntime: Auto detecting GPU type");
+            LoggerService.LogDebug("ConfigureGpuRuntime: Auto detecting GPU type");
             var (detectedType, gpuName) = DetectGpuTypeWithName();
             DetectedGpuType = detectedType;
             DetectedGpuName = gpuName;
@@ -393,7 +389,7 @@ public class WhisperASRService : IASRService
                 if (detectedType == GPUType.CPU)
                 {
                     _settings.GPU.Enabled = false;
-                    Debug.WriteLine("ConfigureGpuRuntime: No GPU detected, disabling GPU mode");
+                    LoggerService.LogWarning("ConfigureGpuRuntime: No GPU detected, disabling GPU mode");
                 }
             }
         }
@@ -401,7 +397,7 @@ public class WhisperASRService : IASRService
         // GPU無効時はCPUモード
         if (!_settings.GPU.Enabled)
         {
-            Debug.WriteLine("ConfigureGpuRuntime: GPU disabled, using CPU mode");
+            LoggerService.LogInfo("ConfigureGpuRuntime: GPU disabled, using CPU mode");
             Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
             Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
             return;
@@ -413,7 +409,7 @@ public class WhisperASRService : IASRService
         {
             case GPUType.NVIDIA_CUDA:
                 // NVIDIA GeForce: CUDAランタイムのみ使用（Vulkanは除外）
-                Debug.WriteLine($"ConfigureGpuRuntime: Setting CUDA device {_settings.GPU.DeviceId} for NVIDIA GPU");
+                LoggerService.LogInfo($"ConfigureGpuRuntime: Setting CUDA device {_settings.GPU.DeviceId} for NVIDIA GPU");
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", _settings.GPU.DeviceId.ToString());
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
                 // CUDA → CPU の優先順位（Vulkanは使用しない）
@@ -421,11 +417,11 @@ public class WhisperASRService : IASRService
                     RuntimeLibrary.Cuda,
                     RuntimeLibrary.Cpu
                 ];
-                Debug.WriteLine("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Cuda, Cpu]");
+                LoggerService.LogInfo("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Cuda, Cpu]");
                 break;
             case GPUType.AMD_Vulkan:
                 // AMD Radeon: Vulkanランタイムを優先
-                Debug.WriteLine($"ConfigureGpuRuntime: Setting Vulkan device {_settings.GPU.DeviceId} for AMD GPU");
+                LoggerService.LogInfo($"ConfigureGpuRuntime: Setting Vulkan device {_settings.GPU.DeviceId} for AMD GPU");
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", _settings.GPU.DeviceId.ToString());
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
                 // Vulkan → CPU の優先順位（CUDAは使用しない）
@@ -433,19 +429,19 @@ public class WhisperASRService : IASRService
                     RuntimeLibrary.Vulkan,
                     RuntimeLibrary.Cpu
                 ];
-                Debug.WriteLine("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Vulkan, Cpu]");
+                LoggerService.LogInfo("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Vulkan, Cpu]");
                 break;
             case GPUType.CPU:
             case GPUType.Auto:
             default:
-                Debug.WriteLine($"ConfigureGpuRuntime: Using CPU mode (effectiveGpuType={effectiveGpuType})");
+                LoggerService.LogInfo($"ConfigureGpuRuntime: Using CPU mode (effectiveGpuType={effectiveGpuType})");
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
                 // CPUのみ
                 RuntimeOptions.RuntimeLibraryOrder = [
                     RuntimeLibrary.Cpu
                 ];
-                Debug.WriteLine("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Cpu]");
+                LoggerService.LogInfo("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Cpu]");
                 break;
         }
     }
@@ -464,7 +460,7 @@ public class WhisperASRService : IASRService
         };
         var message = $"検出したGPU: {gpuName}, 種別: {gpuType}, 使用ランタイム: {runtimeInfo}";
         Trace.WriteLine(message);
-        Debug.WriteLine(message);
+        LoggerService.LogDebug(message);
     }
 
     /// <summary>
@@ -498,7 +494,7 @@ public class WhisperASRService : IASRService
                 }
 
                 allGpuNames.Add(name);
-                Debug.WriteLine($"DetectGpuTypeWithName: Found GPU: {name}");
+                LoggerService.LogDebug($"DetectGpuTypeWithName: Found GPU: {name}");
 
                 if (name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
                     name.Contains("GeForce", StringComparison.OrdinalIgnoreCase))
@@ -516,26 +512,26 @@ public class WhisperASRService : IASRService
             // NVIDIA GPUを優先
             if (nvidiaName != null)
             {
-                Debug.WriteLine($"DetectGpuTypeWithName: Selected NVIDIA GPU: {nvidiaName}");
+                LoggerService.LogInfo($"DetectGpuTypeWithName: Selected NVIDIA GPU: {nvidiaName}");
                 return (GPUType.NVIDIA_CUDA, nvidiaName);
             }
 
             // AMD GPUを検出
             if (amdName != null)
             {
-                Debug.WriteLine($"DetectGpuTypeWithName: Selected AMD GPU: {amdName}");
+                LoggerService.LogInfo($"DetectGpuTypeWithName: Selected AMD GPU: {amdName}");
                 return (GPUType.AMD_Vulkan, amdName);
             }
 
             // 内蔵GPUのみの場合はCPUモード
             var gpuSummary = allGpuNames.Count > 0 ? string.Join(", ", allGpuNames) : "なし";
-            Debug.WriteLine($"DetectGpuTypeWithName: No discrete GPU found, using CPU. Available GPUs: {gpuSummary}");
+            LoggerService.LogInfo($"DetectGpuTypeWithName: No discrete GPU found, using CPU. Available GPUs: {gpuSummary}");
             return (GPUType.CPU, gpuSummary);
         }
         catch (Exception ex)
         {
             Trace.WriteLine($"GPU検出に失敗しました: {ex.Message}");
-            Debug.WriteLine($"GPU検出に失敗しました: {ex.Message}");
+            LoggerService.LogError($"GPU検出に失敗しました: {ex.Message}");
         }
 
         return (GPUType.CPU, "検出エラー");
@@ -613,7 +609,7 @@ public class WhisperASRService : IASRService
             var ggmlType = GetGgmlTypeFromFileName(defaultFileName);
             if (ggmlType == null)
             {
-                Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Unknown model type for {defaultFileName}");
+                LoggerService.LogError($"DownloadModelWithWhisperGgmlAsync: Unknown model type for {defaultFileName}");
                 return null;
             }
 
@@ -631,13 +627,13 @@ public class WhisperASRService : IASRService
                 ModelStatusType.Downloading,
                 $"WhisperGgmlDownloaderで{modelLabel}をダウンロード中..."));
 
-            Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Downloading {ggmlType.Value} to {targetPath}");
+            LoggerService.LogInfo($"DownloadModelWithWhisperGgmlAsync: Downloading {ggmlType.Value} to {targetPath}");
 
             using var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(ggmlType.Value);
             await using var fileWriter = File.Create(targetPath);
             await modelStream.CopyToAsync(fileWriter);
 
-            Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Downloaded successfully to {targetPath}");
+            LoggerService.LogInfo($"DownloadModelWithWhisperGgmlAsync: Downloaded successfully to {targetPath}");
 
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
@@ -649,7 +645,7 @@ public class WhisperASRService : IASRService
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Error - {ex.Message}");
+            LoggerService.LogError($"DownloadModelWithWhisperGgmlAsync: Error - {ex.Message}");
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
                 modelLabel,
@@ -805,14 +801,14 @@ public class WhisperASRService : IASRService
     {
         var message = $"Beam Size指定({beamSize})は未対応のため無視されます。";
         Trace.WriteLine(message);
-        Debug.WriteLine(message);
+        LoggerService.LogDebug(message);
     }
 
     private static void LogBeamSearchUnsupported(int beamSize)
     {
         var message = $"Beam Search設定が未対応のため、Beam Size({beamSize})は適用されません。";
         Trace.WriteLine(message);
-        Debug.WriteLine(message);
+        LoggerService.LogDebug(message);
     }
 
     private static bool TryInvokeBuilder(object builder, string methodName, object argument)
@@ -836,7 +832,7 @@ public class WhisperASRService : IASRService
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Failed to invoke {methodName}: {ex.Message}");
+            LoggerService.LogError($"Failed to invoke {methodName}: {ex.Message}");
             return false;
         }
     }
@@ -861,7 +857,7 @@ public class WhisperASRService : IASRService
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Failed to invoke {methodName}: {ex.Message}");
+            LoggerService.LogError($"Failed to invoke {methodName}: {ex.Message}");
             return false;
         }
     }

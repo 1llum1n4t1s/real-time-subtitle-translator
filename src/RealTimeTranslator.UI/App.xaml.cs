@@ -30,51 +30,51 @@ public partial class App : Application
     {
         try
         {
-            System.Diagnostics.Debug.WriteLine("OnStartup: 起動開始");
+            LoggerService.LogInfo("OnStartup: 起動開始");
             VelopackApp.Build().Run();
-            System.Diagnostics.Debug.WriteLine("OnStartup: Velopack初期化完了");
+            LoggerService.LogInfo("OnStartup: Velopack初期化完了");
             base.OnStartup(e);
-            System.Diagnostics.Debug.WriteLine("OnStartup: base.OnStartup完了");
+            LoggerService.LogInfo("OnStartup: base.OnStartup完了");
 
             // 設定を読み込み
             var settingsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
-            System.Diagnostics.Debug.WriteLine($"OnStartup: settingsPath={settingsPath}");
+            LoggerService.LogInfo($"OnStartup: settingsPath={settingsPath}");
             var settings = AppSettings.Load(settingsPath);
-            System.Diagnostics.Debug.WriteLine("OnStartup: 設定読み込み完了");
+            LoggerService.LogInfo("OnStartup: 設定読み込み完了");
 
             // DIコンテナを構築
             var services = new ServiceCollection();
             ConfigureServices(services, settings, settingsPath);
             _serviceProvider = services.BuildServiceProvider();
-            System.Diagnostics.Debug.WriteLine("OnStartup: DI構築完了");
+            LoggerService.LogInfo("OnStartup: DI構築完了");
 
             var updateService = _serviceProvider.GetRequiredService<IUpdateService>();
             updateService.UpdateSettings(settings.Update);
             _updateCancellation = new CancellationTokenSource();
             _ = updateService.StartAsync(_updateCancellation.Token);
-            System.Diagnostics.Debug.WriteLine("OnStartup: 更新サービス開始");
+            LoggerService.LogInfo("OnStartup: 更新サービス開始");
 
             // オーバーレイウィンドウを表示
             var overlayViewModel = _serviceProvider.GetRequiredService<OverlayViewModel>();
             _overlayWindow = new OverlayWindow(overlayViewModel);
             _overlayWindow.Show();
-            System.Diagnostics.Debug.WriteLine("OnStartup: オーバーレイウィンドウ表示");
+            LoggerService.LogInfo("OnStartup: オーバーレイウィンドウ表示");
 
             // メインウィンドウを表示
             var mainViewModel = _serviceProvider.GetRequiredService<MainViewModel>();
             var mainWindow = new MainWindow(mainViewModel);
             mainWindow.Show();
-            System.Diagnostics.Debug.WriteLine("OnStartup: メインウィンドウ表示");
+            LoggerService.LogInfo("OnStartup: メインウィンドウ表示");
 
             MainWindow = mainWindow;
 
             // モデルをバックグラウンドで初期化（UIスレッドで開始してawaitしない）
             _ = mainViewModel.InitializeModelsAsync();
-            System.Diagnostics.Debug.WriteLine("OnStartup: 起動完了");
+            LoggerService.LogInfo("OnStartup: 起動完了");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"アプリケーション起動エラー: {ex}");
+            LoggerService.LogError($"アプリケーション起動エラー: {ex}");
             MessageBox.Show($"アプリケーション起動に失敗しました:\n\n{ex.Message}\n\n{ex.StackTrace}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
             Current.Shutdown(1);
         }
@@ -122,12 +122,12 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        System.Diagnostics.Debug.WriteLine("OnExit: アプリケーション終了開始");
+        LoggerService.LogInfo("OnExit: アプリケーション終了開始");
 
         // 更新サービスをキャンセル
         _updateCancellation?.Cancel();
         _updateCancellation?.Dispose();
-        System.Diagnostics.Debug.WriteLine("OnExit: 更新サービス停止");
+        LoggerService.LogInfo("OnExit: 更新サービス停止");
 
         // オーバーレイウィンドウを閉じる
         if (_overlayWindow != null)
@@ -135,7 +135,7 @@ public partial class App : Application
             _overlayWindow.Close();
             _overlayWindow = null;
         }
-        System.Diagnostics.Debug.WriteLine("OnExit: オーバーレイウィンドウ終了");
+        LoggerService.LogInfo("OnExit: オーバーレイウィンドウ終了");
 
         // サービスとViewModelを適切に破棄
         if (_serviceProvider != null)
@@ -143,27 +143,27 @@ public partial class App : Application
             // MainViewModelのDispose（イベントハンドラ登録解除、キャプチャ停止）
             var mainViewModel = _serviceProvider.GetService<MainViewModel>();
             mainViewModel?.Dispose();
-            System.Diagnostics.Debug.WriteLine("OnExit: MainViewModel Dispose完了");
+            LoggerService.LogInfo("OnExit: MainViewModel Dispose完了");
 
             // OverlayViewModelのDispose
             var overlayViewModel = _serviceProvider.GetService<OverlayViewModel>();
             overlayViewModel?.Dispose();
-            System.Diagnostics.Debug.WriteLine("OnExit: OverlayViewModel Dispose完了");
+            LoggerService.LogInfo("OnExit: OverlayViewModel Dispose完了");
 
             // 音声キャプチャサービスをDispose
             var audioCaptureService = _serviceProvider.GetService<IAudioCaptureService>();
             audioCaptureService?.Dispose();
-            System.Diagnostics.Debug.WriteLine("OnExit: AudioCaptureService Dispose完了");
+            LoggerService.LogInfo("OnExit: AudioCaptureService Dispose完了");
 
             // ASRサービスをDispose
             var asrService = _serviceProvider.GetService<IASRService>();
             asrService?.Dispose();
-            System.Diagnostics.Debug.WriteLine("OnExit: ASRService Dispose完了");
+            LoggerService.LogInfo("OnExit: ASRService Dispose完了");
 
             // 翻訳サービスをDispose
             var translationService = _serviceProvider.GetService<ITranslationService>();
             translationService?.Dispose();
-            System.Diagnostics.Debug.WriteLine("OnExit: TranslationService Dispose完了");
+            LoggerService.LogInfo("OnExit: TranslationService Dispose完了");
 
             // HttpClientとModelDownloadServiceを適切に破棄
             var httpClient = _serviceProvider.GetService<HttpClient>();
@@ -171,14 +171,14 @@ public partial class App : Application
 
             var downloadService = _serviceProvider.GetService<ModelDownloadService>();
             downloadService?.Dispose();
-            System.Diagnostics.Debug.WriteLine("OnExit: DownloadService Dispose完了");
+            LoggerService.LogInfo("OnExit: DownloadService Dispose完了");
 
             _serviceProvider.Dispose();
             _serviceProvider = null;
-            System.Diagnostics.Debug.WriteLine("OnExit: ServiceProvider Dispose完了");
+            LoggerService.LogInfo("OnExit: ServiceProvider Dispose完了");
         }
 
-        System.Diagnostics.Debug.WriteLine("OnExit: アプリケーション終了完了");
+        LoggerService.LogInfo("OnExit: アプリケーション終了完了");
         base.OnExit(e);
     }
 }

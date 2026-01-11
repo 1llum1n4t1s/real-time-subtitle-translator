@@ -65,7 +65,7 @@ public class LocalTranslationService : ITranslationService
             var modelPath = ResolveModelPath();
             if (modelPath == null)
             {
-                System.Diagnostics.Debug.WriteLine($"Translation model not found at: {GetModelRootPath()}");
+                LoggerService.LogWarning($"Translation model not found at: {GetModelRootPath()}");
                 // 翻訳ライブラリが未実装のため、原文表示モードで動作
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
@@ -79,7 +79,7 @@ public class LocalTranslationService : ITranslationService
             _isModelLoaded = TryLoadArgosModel(modelPath, _settings.SourceLanguage, _settings.TargetLanguage);
             if (!_isModelLoaded)
             {
-                System.Diagnostics.Debug.WriteLine($"Argos Translate model load failed. modelPath={modelPath}");
+                LoggerService.LogError($"Argos Translate model load failed. modelPath={modelPath}");
                 // ステータス変更イベントはTryLoadArgosModel内で発火済みの場合があるのでスキップ
             }
             else
@@ -237,12 +237,12 @@ public class LocalTranslationService : ITranslationService
     {
         try
         {
-            System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel: modelPath={modelPath}, src={sourceLanguage}, tgt={targetLanguage}");
+            LoggerService.LogDebug($"TryLoadArgosModel: modelPath={modelPath}, src={sourceLanguage}, tgt={targetLanguage}");
 
             var packageType = Type.GetType("ArgosTranslate.Models.Package, ArgosTranslate.NET");
             if (packageType == null)
             {
-                System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: ArgosTranslate.Models.Package type not found - translation library not installed");
+                LoggerService.LogError("TryLoadArgosModel: ArgosTranslate.Models.Package type not found - translation library not installed");
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     ModelLabel,
@@ -254,7 +254,7 @@ public class LocalTranslationService : ITranslationService
             var loadFromMethod = packageType.GetMethod("LoadFrom", [typeof(string)]);
             if (loadFromMethod == null)
             {
-                System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: LoadFrom method not found");
+                LoggerService.LogError("TryLoadArgosModel: LoadFrom method not found");
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     ModelLabel,
@@ -266,7 +266,7 @@ public class LocalTranslationService : ITranslationService
             var package = loadFromMethod.Invoke(null, [modelPath]);
             if (package == null)
             {
-                System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel: Package.LoadFrom returned null for path: {modelPath}");
+                LoggerService.LogError($"TryLoadArgosModel: Package.LoadFrom returned null for path: {modelPath}");
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     ModelLabel,
@@ -277,7 +277,7 @@ public class LocalTranslationService : ITranslationService
 
             var installMethod = packageType.GetMethod("Install", Type.EmptyTypes);
             installMethod?.Invoke(package, null);
-            System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: Package installed");
+            LoggerService.LogInfo("TryLoadArgosModel: Package installed");
 
             var getTranslationMethod = packageType.GetMethod("GetTranslation", [typeof(string), typeof(string)]);
             _translationModel = getTranslationMethod != null
@@ -286,7 +286,7 @@ public class LocalTranslationService : ITranslationService
 
             if (_translationModel == null)
             {
-                System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel: GetTranslation returned null for {sourceLanguage}->{targetLanguage}");
+                LoggerService.LogError($"TryLoadArgosModel: GetTranslation returned null for {sourceLanguage}->{targetLanguage}");
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     ModelLabel,
@@ -298,7 +298,7 @@ public class LocalTranslationService : ITranslationService
             var translateMethod = _translationModel.GetType().GetMethod("Translate", [typeof(string)]);
             if (translateMethod == null)
             {
-                System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: Translate method not found");
+                LoggerService.LogError("TryLoadArgosModel: Translate method not found");
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     ModelLabel,
@@ -311,12 +311,12 @@ public class LocalTranslationService : ITranslationService
                 typeof(Func<string, string>),
                 _translationModel);
 
-            System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: Successfully loaded");
+            LoggerService.LogInfo("TryLoadArgosModel: Successfully loaded");
             return true;
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel error: {ex}");
+            LoggerService.LogError($"TryLoadArgosModel error: {ex}");
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
                 ModelLabel,

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using RealTimeTranslator.Core.Services;
 
 namespace RealTimeTranslator.Core.Models;
 
@@ -58,7 +59,7 @@ public class AppSettings
 
             if (settings == null)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to deserialize settings from {filePath}, using defaults");
+                LoggerService.LogWarning($"Failed to deserialize settings from {filePath}, using defaults");
                 return new AppSettings();
             }
 
@@ -68,12 +69,12 @@ public class AppSettings
         }
         catch (JsonException ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid JSON in settings file {filePath}: {ex.Message}");
+            LoggerService.LogWarning($"Invalid JSON in settings file {filePath}: {ex.Message}");
             return new AppSettings();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error loading settings from {filePath}: {ex.Message}");
+            LoggerService.LogWarning($"Error loading settings from {filePath}: {ex.Message}");
             return new AppSettings();
         }
     }
@@ -86,63 +87,63 @@ public class AppSettings
         // サンプルレートの検証
         if (settings.AudioCapture.SampleRate <= 0)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid SampleRate {settings.AudioCapture.SampleRate}, using default 16000");
+            LoggerService.LogWarning($"Invalid SampleRate {settings.AudioCapture.SampleRate}, using default 16000");
             settings.AudioCapture.SampleRate = 16000;
         }
 
         // VAD感度の検証
         if (settings.AudioCapture.VADSensitivity < 0 || settings.AudioCapture.VADSensitivity > 1)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid VADSensitivity {settings.AudioCapture.VADSensitivity}, using default 0.5");
+            LoggerService.LogWarning($"Invalid VADSensitivity {settings.AudioCapture.VADSensitivity}, using default 0.5");
             settings.AudioCapture.VADSensitivity = 0.5f;
         }
 
         // 最小発話長の検証
         if (settings.AudioCapture.MinSpeechDuration < 0)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid MinSpeechDuration {settings.AudioCapture.MinSpeechDuration}, using default 0.5");
+            LoggerService.LogWarning($"Invalid MinSpeechDuration {settings.AudioCapture.MinSpeechDuration}, using default 0.5");
             settings.AudioCapture.MinSpeechDuration = 0.5f;
         }
 
         // 最大発話長の検証
         if (settings.AudioCapture.MaxSpeechDuration <= settings.AudioCapture.MinSpeechDuration)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid MaxSpeechDuration {settings.AudioCapture.MaxSpeechDuration}, using default 6.0");
+            LoggerService.LogWarning($"Invalid MaxSpeechDuration {settings.AudioCapture.MaxSpeechDuration}, using default 6.0");
             settings.AudioCapture.MaxSpeechDuration = 6.0f;
         }
 
         // フォントサイズの検証
         if (settings.Overlay.FontSize <= 0)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid FontSize {settings.Overlay.FontSize}, using default 24");
+            LoggerService.LogWarning($"Invalid FontSize {settings.Overlay.FontSize}, using default 24");
             settings.Overlay.FontSize = 24;
         }
 
         // 表示時間の検証
         if (settings.Overlay.DisplayDuration <= 0)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid DisplayDuration {settings.Overlay.DisplayDuration}, using default 5.0");
+            LoggerService.LogWarning($"Invalid DisplayDuration {settings.Overlay.DisplayDuration}, using default 5.0");
             settings.Overlay.DisplayDuration = 5.0;
         }
 
         // キャッシュサイズの検証
         if (settings.Translation.CacheSize <= 0)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid CacheSize {settings.Translation.CacheSize}, using default 1000");
+            LoggerService.LogWarning($"Invalid CacheSize {settings.Translation.CacheSize}, using default 1000");
             settings.Translation.CacheSize = 1000;
         }
 
         // Beam Sizeの検証
         if (settings.ASR.BeamSize <= 0)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid BeamSize {settings.ASR.BeamSize}, using default 5");
+            LoggerService.LogWarning($"Invalid BeamSize {settings.ASR.BeamSize}, using default 5");
             settings.ASR.BeamSize = 5;
         }
 
         // GPU Device IDの検証
         if (settings.ASR.GPU.DeviceId < 0)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid GPU DeviceId {settings.ASR.GPU.DeviceId}, using default 0");
+            LoggerService.LogWarning($"Invalid GPU DeviceId {settings.ASR.GPU.DeviceId}, using default 0");
             settings.ASR.GPU.DeviceId = 0;
         }
     }

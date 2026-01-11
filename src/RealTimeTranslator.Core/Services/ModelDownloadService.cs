@@ -40,7 +40,7 @@ public class ModelDownloadService : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        System.Diagnostics.Debug.WriteLine($"[{serviceName}] EnsureModelAsync called: modelPath={modelPath}, defaultFileName={defaultFileName}, downloadUrl={downloadUrl}");
+        LoggerService.LogDebug($"[{serviceName}] EnsureModelAsync called: modelPath={modelPath}, defaultFileName={defaultFileName}, downloadUrl={downloadUrl}");
 
         if (string.IsNullOrWhiteSpace(modelPath))
         {
@@ -49,7 +49,7 @@ public class ModelDownloadService : IDisposable
                 modelLabel,
                 ModelStatusType.LoadFailed,
                 "モデルパスが未設定のためダウンロードをスキップしました。"));
-            System.Diagnostics.Debug.WriteLine($"[{serviceName}] Model path is not set.");
+            LoggerService.LogWarning($"[{serviceName}] Model path is not set.");
             return null;
         }
 
@@ -61,7 +61,7 @@ public class ModelDownloadService : IDisposable
                 modelLabel,
                 ModelStatusType.LoadFailed,
                 "モデルパスが不正です。"));
-            System.Diagnostics.Debug.WriteLine($"[{serviceName}] Model path is invalid: {modelPath}");
+            LoggerService.LogWarning($"[{serviceName}] Model path is invalid: {modelPath}");
             return null;
         }
 

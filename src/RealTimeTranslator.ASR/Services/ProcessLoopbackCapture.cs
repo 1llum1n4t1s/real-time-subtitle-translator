@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using RealTimeTranslator.Core.Services;
 
 namespace RealTimeTranslator.ASR.Services;
 
@@ -50,7 +51,7 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
         try
         {
             device = GetDefaultRenderDevice();
-            System.Diagnostics.Debug.WriteLine($"ProcessLoopbackCapture: TargetProcessId={targetProcessId}, DefaultDevice={device.FriendlyName}");
+            LoggerService.LogDebug($"ProcessLoopbackCapture: TargetProcessId={targetProcessId}, DefaultDevice={device.FriendlyName}");
             audioClient = ActivateProcessAudioClient(targetProcessId);
             _audioClient = audioClient;
 
@@ -191,18 +192,18 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
         var completionHandler = new ActivateCompletionHandler();
         try
         {
-            System.Diagnostics.Debug.WriteLine($"ActivateAudioInterfaceAsync: deviceInterfacePath={deviceInterfacePath}");
+            LoggerService.LogDebug($"ActivateAudioInterfaceAsync: deviceInterfacePath={deviceInterfacePath}");
             var hr = ActivateAudioInterfaceAsync(deviceInterfacePath, ref iid, activationParams, completionHandler, out var result);
             if (hr != 0)
             {
-                System.Diagnostics.Debug.WriteLine($"ActivateAudioInterfaceAsync failed: HRESULT={hr:X8}");
+                LoggerService.LogError($"ActivateAudioInterfaceAsync failed: HRESULT={hr:X8}");
                 Marshal.ThrowExceptionForHR(hr);
             }
 
             completionHandler.WaitForCompletion();
             audioClient = completionHandler.GetActivatedInterface();
             Marshal.ReleaseComObject(result);
-            System.Diagnostics.Debug.WriteLine("ActivateAudioInterfaceAsync: Success");
+            LoggerService.LogInfo("ActivateAudioInterfaceAsync: Success");
         }
         catch (TimeoutException tex)
         {
@@ -211,7 +212,7 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Audio client activation error: {ex.GetType().Name} - {ex.Message}");
+            LoggerService.LogError($"Audio client activation error: {ex.GetType().Name} - {ex.Message}");
             throw;
         }
     }

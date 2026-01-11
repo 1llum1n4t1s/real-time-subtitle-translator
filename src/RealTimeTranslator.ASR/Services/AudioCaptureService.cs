@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using NAudio.Wave;
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
+using RealTimeTranslator.Core.Services;
 
 namespace RealTimeTranslator.ASR.Services;
 
@@ -118,7 +119,7 @@ public class AudioCaptureService : IAudioCaptureService
         var retryStopwatch = Stopwatch.StartNew();
         var processesToTry = GetProcessesToTry(processId);
 
-        Debug.WriteLine($"StartCaptureWithRetryAsync: Will try {processesToTry.Count} process(es): {string.Join(", ", processesToTry)}");
+        LoggerService.LogDebug($"StartCaptureWithRetryAsync: Will try {processesToTry.Count} process(es): {string.Join(", ", processesToTry)}");
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -140,13 +141,13 @@ public class AudioCaptureService : IAudioCaptureService
                         ? "音声キャプチャを開始しました。"
                         : $"音声キャプチャを開始しました。(PID: {currentProcessId})";
                     OnCaptureStatusChanged(message, false);
-                    Debug.WriteLine($"StartCaptureWithRetryAsync: Successfully started capture for process {currentProcessId}");
+                    LoggerService.LogInfo($"StartCaptureWithRetryAsync: Successfully started capture for process {currentProcessId}");
                     return true;
                 }
                 catch (COMException ex) when (ex.HResult == FileNotFoundHResult)
                 {
                     // このプロセスではオーディオセッションが見つからない
-                    Debug.WriteLine($"StartCaptureWithRetryAsync: Audio session not found (HRESULT 0x80070002) for process {currentProcessId}");
+                    LoggerService.LogWarning($"StartCaptureWithRetryAsync: Audio session not found (HRESULT 0x80070002) for process {currentProcessId}");
                     CleanupCapture();
                     // 次のプロセスを試す
                     continue;
@@ -154,7 +155,7 @@ public class AudioCaptureService : IAudioCaptureService
                 catch (FileNotFoundException fex)
                 {
                     // このプロセスではオーディオセッションが見つからない
-                    Debug.WriteLine($"StartCaptureWithRetryAsync: FileNotFoundException for process {currentProcessId}: {fex.Message}");
+                    LoggerService.LogError($"StartCaptureWithRetryAsync: FileNotFoundException for process {currentProcessId}: {fex.Message}");
                     CleanupCapture();
                     // 次のプロセスを試す
                     continue;

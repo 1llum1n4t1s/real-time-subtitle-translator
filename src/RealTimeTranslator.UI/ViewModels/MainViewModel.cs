@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NAudio.CoreAudioApi;
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
+using RealTimeTranslator.Core.Services;
 using RealTimeTranslator.UI.Views;
 
 namespace RealTimeTranslator.UI.ViewModels;
@@ -354,7 +355,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             StatusText = "音声の再生を待機中...";
             StatusColor = Brushes.Orange;
             Log($"'{SelectedProcess.DisplayName}' (PID: {SelectedProcess.Id}) の音声再生を待機しています...");
-            Debug.WriteLine($"StartAsync: Starting audio capture for process: {SelectedProcess.Name} (ID: {SelectedProcess.Id}, Title: {SelectedProcess.Title})");
+            LoggerService.LogDebug($"StartAsync: Starting audio capture for process: {SelectedProcess.Name} (ID: {SelectedProcess.Id}, Title: {SelectedProcess.Title})");
 
             var captureStarted = await _audioCaptureService.StartCaptureWithRetryAsync(
                 SelectedProcess.Id,
@@ -381,12 +382,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             StatusText = "エラー";
             StatusColor = Brushes.Red;
             Log($"エラー: {ex.GetType().Name}: {ex.Message}");
-            System.Diagnostics.Debug.WriteLine($"StartAsync Error: {ex.GetType().FullName}: {ex.Message}");
-            System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");
+            LoggerService.LogException($"StartAsync Error: {ex.GetType().FullName}: {ex.Message}", ex);
             if (ex.InnerException != null)
             {
                 Log($"内部エラー: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
-                System.Diagnostics.Debug.WriteLine($"InnerException: {ex.InnerException.GetType().FullName}: {ex.InnerException.Message}");
+                LoggerService.LogException($"InnerException: {ex.InnerException.GetType().FullName}: {ex.InnerException.Message}", ex.InnerException);
             }
         }
     }
@@ -840,11 +840,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     LoadingMessage = "ASRモデルをダウンロード中...";
                     await _asrService.InitializeAsync();
-                    System.Diagnostics.Debug.WriteLine("ASR model initialization completed");
+                    LoggerService.LogInfo("ASR model initialization completed");
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"ASR initialization error: {ex.Message}");
+                    LoggerService.LogError($"ASR initialization error: {ex.Message}");
                     throw;
                 }
             });
@@ -855,11 +855,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     LoadingMessage = "翻訳モデルをダウンロード中...";
                     await _translationService.InitializeAsync();
-                    System.Diagnostics.Debug.WriteLine("Translation model initialization completed");
+                    LoggerService.LogInfo("Translation model initialization completed");
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Translation initialization error: {ex.Message}");
+                    LoggerService.LogError($"Translation initialization error: {ex.Message}");
                     throw;
                 }
             });
@@ -869,13 +869,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             LoadingMessage = "準備完了";
             Log("モデルの初期化が完了しました。");
-            System.Diagnostics.Debug.WriteLine("All models initialized successfully");
+            LoggerService.LogInfo("All models initialized successfully");
         }
         catch (Exception ex)
         {
             LoadingMessage = $"初期化エラー: {ex.Message}";
             Log($"モデル初期化エラー: {ex.Message}");
-            System.Diagnostics.Debug.WriteLine($"モデル初期化エラー: {ex}");
+            LoggerService.LogError($"モデル初期化エラー: {ex}");
         }
         finally
         {
@@ -944,14 +944,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                 {
                     // 個別のセッション取得に失敗しても続行
-                    System.Diagnostics.Debug.WriteLine($"Failed to get audio session info: {ex.Message}");
+                    LoggerService.LogError($"Failed to get audio session info: {ex.Message}");
                 }
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             // AudioSessionの取得に失敗した場合は空のセットを返す
-            System.Diagnostics.Debug.WriteLine($"Failed to enumerate audio sessions: {ex.Message}");
+            LoggerService.LogError($"Failed to enumerate audio sessions: {ex.Message}");
         }
 
         return processIds;
@@ -972,24 +972,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 開始");
+        LoggerService.LogDebug("MainViewModel.Dispose: 開始");
 
         // 音声キャプチャを停止
         try
         {
             _audioCaptureService.StopCapture();
-            System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 音声キャプチャ停止完了");
+            LoggerService.LogInfo("MainViewModel.Dispose: 音声キャプチャ停止完了");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"MainViewModel.Dispose: 音声キャプチャ停止エラー: {ex.Message}");
+            LoggerService.LogError($"MainViewModel.Dispose: 音声キャプチャ停止エラー: {ex.Message}");
         }
 
         // 処理パイプラインの停止
         _processingCancellation?.Cancel();
         _processingCancellation?.Dispose();
         _processingCancellation = null;
-        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 処理パイプライン停止完了");
+        LoggerService.LogInfo("MainViewModel.Dispose: 処理パイプライン停止完了");
 
         // イベントハンドラの登録解除
         _audioCaptureService.AudioDataAvailable -= OnAudioDataAvailable;
@@ -1002,11 +1002,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _updateService.StatusChanged -= OnUpdateStatusChanged;
         _updateService.UpdateAvailable -= OnUpdateAvailable;
         _updateService.UpdateReady -= OnUpdateReady;
-        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: イベントハンドラ解除完了");
+        LoggerService.LogInfo("MainViewModel.Dispose: イベントハンドラ解除完了");
 
         _disposed = true;
         GC.SuppressFinalize(this);
-        System.Diagnostics.Debug.WriteLine("MainViewModel.Dispose: 完了");
+        LoggerService.LogInfo("MainViewModel.Dispose: 完了");
     }
 }
 

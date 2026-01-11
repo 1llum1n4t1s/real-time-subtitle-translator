@@ -4,6 +4,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
 using RealTimeTranslator.Core.Services;
+using static RealTimeTranslator.Core.Services.LoggerService;
 
 namespace RealTimeTranslator.Translation.Services;
 
@@ -126,7 +127,7 @@ public class OnnxTranslationService : ITranslationService
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Translation initialization error: {ex}");
+            LoggerService.LogError($"Translation initialization error: {ex}");
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
                 ModelLabel,
@@ -170,11 +171,11 @@ public class OnnxTranslationService : ITranslationService
                     $"{Path.GetFileName(targetPath)}: {progress:F1}%"));
             }
 
-            Debug.WriteLine($"Downloaded model file: {targetPath}");
+            LoggerService.LogInfo($"Downloaded model file: {targetPath}");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error downloading model file {downloadUrl}: {ex.Message}");
+            LoggerService.LogError($"Error downloading model file {downloadUrl}: {ex.Message}");
             throw;
         }
     }
@@ -275,12 +276,17 @@ public class OnnxTranslationService : ITranslationService
 
     private async Task<string> PerformTranslationAsync(string text, string sourceLanguage, string targetLanguage)
     {
+        LogDebug($"[PerformTranslationAsync] 開始: Text={text}, Source={sourceLanguage}, Target={targetLanguage}");
+        LogDebug($"[PerformTranslationAsync] 状態: IsModelLoaded={_isModelLoaded}, Session={_session != null}, Tokenizer={_tokenizer != null}");
+
         if (!_isModelLoaded || _session == null || _tokenizer == null)
         {
+            LogError($"[PerformTranslationAsync] フォールバック: IsModelLoaded={_isModelLoaded}, Session is null={_session == null}, Tokenizer is null={_tokenizer == null}");
             // フォールバック：原文に言語タグを付けて返す
             return $"[{targetLanguage}] {text}";
         }
 
+        LogDebug("[PerformTranslationAsync] 実際の翻訳処理に進入");
         return await Task.Run(() =>
         {
             try
@@ -358,7 +364,7 @@ public class OnnxTranslationService : ITranslationService
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Translation error: {ex.Message}");
+                LoggerService.LogError($"Translation error: {ex.Message}");
                 return $"[{targetLanguage}] {text}";
             }
         });
@@ -379,7 +385,7 @@ public class OnnxTranslationService : ITranslationService
     {
         try
         {
-            Debug.WriteLine($"Loading NLLB ONNX translation model from: {modelFolderPath}");
+            LoggerService.LogDebug($"Loading NLLB ONNX translation model from: {modelFolderPath}");
 
             // エンコーダーとデコーダーのパスを指定
             var encoderPath = Path.Combine(modelFolderPath, DefaultEncoderFileName);
@@ -393,16 +399,21 @@ public class OnnxTranslationService : ITranslationService
 
             // ONNX Runtimeセッションを作成（エンコーダー）
             var sessionOptions = new SessionOptions();
-            Debug.WriteLine("ONNX Runtime: Using CPU execution provider");
+            LogDebug("ONNX Runtime: Using CPU execution provider");
+            LogDebug($"[LoadModel] エンコーダーセッション作成: {encoderPath}");
             _session = new InferenceSession(encoderPath, sessionOptions);
+            LogDebug("[LoadModel] エンコーダーセッション作成完了");
 
             // トークナイザーの読み込み
             var tokenizerPath = Path.Combine(modelFolderPath, DefaultTokenizerFileName);
+            LogDebug($"[LoadModel] トークナイザーパス: {tokenizerPath}, 存在={File.Exists(tokenizerPath)}");
             _tokenizer = File.Exists(tokenizerPath)
                 ? new SimpleTokenizer(tokenizerPath)
                 : new SimpleTokenizer(); // フォールバック：簡易トークナイザー
+            LogDebug("[LoadModel] トークナイザー読み込み完了");
 
             _isModelLoaded = true;
+            LogDebug("[LoadModel] モデル読み込み状態: _isModelLoaded=true");
 
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
@@ -410,11 +421,11 @@ public class OnnxTranslationService : ITranslationService
                 ModelStatusType.LoadSucceeded,
                 "NLLB翻訳モデルの読み込みが完了しました。"));
 
-            Debug.WriteLine("NLLB ONNX translation model loaded successfully");
+            LoggerService.LogInfo("NLLB ONNX translation model loaded successfully");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"NLLB ONNX translation model loading error: {ex}");
+            LoggerService.LogError($"NLLB ONNX translation model loading error: {ex}");
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
                 ModelLabel,
@@ -493,11 +504,11 @@ public class OnnxTranslationService : ITranslationService
                 // 簡略版：tokenizer.jsonが存在する場合は、基本的なボキャブラリのみを初期化
                 // 完全な実装にはJSON解析が必要
                 InitializeBasicTokenizer();
-                Debug.WriteLine($"Tokenizer file found but using basic tokenizer: {path}");
+                LoggerService.LogWarning($"Tokenizer file found but using basic tokenizer: {path}");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Failed to load tokenizer: {ex.Message}");
+                LoggerService.LogError($"Failed to load tokenizer: {ex.Message}");
                 InitializeBasicTokenizer();
             }
         }

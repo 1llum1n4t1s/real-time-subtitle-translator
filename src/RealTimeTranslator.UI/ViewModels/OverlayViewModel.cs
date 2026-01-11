@@ -4,6 +4,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using RealTimeTranslator.Core.Models;
+using RealTimeTranslator.Core.Services;
 
 namespace RealTimeTranslator.UI.ViewModels;
 
@@ -160,7 +161,7 @@ internal static class BrushHelper
     {
         if (string.IsNullOrWhiteSpace(colorString))
         {
-            System.Diagnostics.Debug.WriteLine($"Color string is null or empty, using fallback: {fallbackColor}");
+            LoggerService.LogWarning($"Color string is null or empty, using fallback: {fallbackColor}");
             return new SolidColorBrush(fallbackColor);
         }
 
@@ -171,12 +172,12 @@ internal static class BrushHelper
         }
         catch (FormatException ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Invalid color format '{colorString}': {ex.Message}. Using fallback: {fallbackColor}");
+            LoggerService.LogWarning($"Invalid color format '{colorString}': {ex.Message}. Using fallback: {fallbackColor}");
             return new SolidColorBrush(fallbackColor);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error parsing color '{colorString}': {ex.Message}. Using fallback: {fallbackColor}");
+            LoggerService.LogError($"Error parsing color '{colorString}': {ex.Message}. Using fallback: {fallbackColor}");
             return new SolidColorBrush(fallbackColor);
         }
     }
