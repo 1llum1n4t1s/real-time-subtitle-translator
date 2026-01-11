@@ -317,35 +317,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (profile != null)
             {
-                _asrService.SetHotwords(profile.Hotwords);
-                _asrService.SetInitialPrompt(profile.InitialPrompt);
-                _asrService.SetCorrectionDictionary(profile.ASRCorrectionDictionary);
                 _translationService.SetPreTranslationDictionary(profile.PreTranslationDictionary);
                 _translationService.SetPostTranslationDictionary(profile.PostTranslationDictionary);
                 Log($"プロファイル '{profile.Name}' を適用しました");
             }
 
             // モデルのロード状態を確認（アプリ起動時に初期化済み）
-            if (!_asrService.IsModelLoaded)
+            if (!_translationService.IsModelLoaded)
             {
                 IsRunning = false;
-                StatusText = "ASRモデル未ロード: 音声認識を開始できません。";
+                StatusText = "翻訳モデル未ロード: 翻訳を開始できません。";
                 StatusColor = Brushes.Red;
-                Log("ASRモデル未ロードのため音声認識を停止しました。モデルのダウンロードが完了するまでお待ちください。");
+                Log("翻訳モデル未ロードのため翻訳を停止しました。モデルのダウンロードが完了するまでお待ちください。");
                 return;
             }
 
             var sourceLanguage = _settings.Translation.SourceLanguage;
             var targetLanguage = _settings.Translation.TargetLanguage;
 
-            if (!_translationService.IsModelLoaded)
-            {
-                Log($"翻訳モデル未ロードのためタグ付け翻訳にフォールバックします ({sourceLanguage}→{targetLanguage})。");
-            }
-            else
-            {
-                Log($"翻訳モデルが準備完了しました ({sourceLanguage}→{targetLanguage})。");
-            }
+            Log($"翻訳モデルが準備完了しました ({sourceLanguage}→{targetLanguage})。");
 
             await StartProcessingPipelinesAsync(_processingCancellation.Token);
 
