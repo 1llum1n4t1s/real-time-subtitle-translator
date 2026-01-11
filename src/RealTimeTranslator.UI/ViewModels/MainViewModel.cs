@@ -24,13 +24,12 @@ namespace RealTimeTranslator.UI.ViewModels;
 public partial class MainViewModel : ObservableObject, IDisposable
 {
     private bool _disposed;
-    private const int MaxAccurateParallelism = 2; // 高精度ASRの最大並列処理数
+    private const int MaxTranslationParallelism = 2; // 翻訳の最大並列処理数
     private const int MaxLogLines = 1000; // ログの最大行数
     private const int ChannelCapacity = 100; // チャネルバッファサイズ
 
     private readonly IAudioCaptureService _audioCaptureService;
     private readonly IVADService _vadService;
-    private readonly IASRService _asrService;
     private readonly ITranslationService _translationService;
     private readonly OverlayViewModel _overlayViewModel;
     private readonly AppSettings _settings;
@@ -41,10 +40,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly Queue<string> _logLines = new();
     private string? _lastLogMessage;
     private CancellationTokenSource? _processingCancellation;
-    private Channel<SpeechSegmentWorkItem>? _segmentChannel;
-    private Channel<SpeechSegmentWorkItem>? _accurateChannel;
-    private Task? _fastProcessingTask;
-    private Task? _accurateProcessingTask;
+    private Channel<SpeechSegmentWorkItem>? _translationChannel;
+    private Task? _translationProcessingTask;
     private long _segmentSequence;
 
     [ObservableProperty]
@@ -95,7 +92,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _audioCaptureService = audioCaptureService;
         _vadService = vadService;
-        _asrService = null!;
         _translationService = translationService;
         _overlayViewModel = overlayViewModel;
         _settings = settings;
@@ -416,7 +412,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // 状態とチャネルを一度に取得してTOCTOUバグを回避
             var isRunning = IsRunning;
             var cancellation = _processingCancellation;
-            var channel = _segmentChannel;
+            var channel = _translationChannel;
 
             if (!isRunning || cancellation == null || cancellation.IsCancellationRequested || channel == null)
             {
@@ -454,243 +450,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await StopProcessingPipelinesAsync();
 
         _segmentSequence = 0;
-        // バウンデッドチャネルを使用してメモリ使用量を制限
-        _segmentChannel = Channel.CreateBounded<SpeechSegmentWorkItem>(new BoundedChannelOptions(ChannelCapacity)
+        _translationChannel = Channel.CreateBounded<SpeechSegmentWorkItem>(new BoundedChannelOptions(ChannelCapacity)
         {
             SingleReader = true,
             SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropOldest // バッファが満杯時は最古のアイテムを削除
-        });
-        _accurateChannel = Channel.CreateBounded<SpeechSegmentWorkItem>(new BoundedChannelOptions(ChannelCapacity)
-        {
-            SingleReader = true,
-            SingleWriter = true,
-            FullMode = BoundedChannelFullMode.Wait // バッファが満杯時はライターが待機
+            FullMode = BoundedChannelFullMode.DropOldest
         });
 
-        _fastProcessingTask = Task.Run(() => ProcessFastQueueAsync(_segmentChannel.Reader, _accurateChannel.Writer, token), token);
-        _accurateProcessingTask = Task.Run(() => ProcessAccurateQueueAsync(_accurateChannel.Reader, token), token);
+        _translationProcessingTask = Task.Run(() => ProcessTranslationQueueAsync(_translationChannel.Reader, token), token);
     }
 
     private async Task StopProcessingPipelinesAsync()
     {
-        _segmentChannel?.Writer.TryComplete();
-        _accurateChannel?.Writer.TryComplete();
+        _translationChannel?.Writer.TryComplete();
 
-        // タスクの完了を待機（タイムアウト付き）
-        var tasks = new List<Task>();
-        if (_fastProcessingTask != null)
-        {
-            tasks.Add(_fastProcessingTask);
-        }
-        if (_accurateProcessingTask != null)
-        {
-            tasks.Add(_accurateProcessingTask);
-        }
-
-        if (tasks.Count > 0)
+        if (_translationProcessingTask != null)
         {
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(5));
+                await _translationProcessingTask.WaitAsync(TimeSpan.FromSeconds(5));
             }
             catch (TimeoutException)
             {
-                Log("処理パイプラインの停止がタイムアウトしました");
+                Log("翻訳処理パイプラインの停止がタイムアウトしました");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Log($"処理パイプライン停止エラー: {ex.Message}");
+                Log($"翻訳パイプライン停止エラー: {ex.Message}");
             }
         }
 
-        _segmentChannel = null;
-        _accurateChannel = null;
-        _fastProcessingTask = null;
-        _accurateProcessingTask = null;
+        _translationChannel = null;
+        _translationProcessingTask = null;
     }
 
-    private async Task ProcessFastQueueAsync(
+    private async Task ProcessTranslationQueueAsync(
         ChannelReader<SpeechSegmentWorkItem> reader,
-        ChannelWriter<SpeechSegmentWorkItem> accurateWriter,
         CancellationToken token)
     {
-        try
-        {
-            await foreach (var item in reader.ReadAllAsync(token))
-            {
-                if (token.IsCancellationRequested || !IsRunning)
-                {
-                    return;
-                }
-
-                var fastResult = await _asrService.TranscribeFastAsync(item.Segment);
-                if (token.IsCancellationRequested || !IsRunning)
-                {
-                    return;
-                }
-
-                ProcessingLatency = fastResult.ProcessingTimeMs;
-
-                if (!string.IsNullOrWhiteSpace(fastResult.Text))
-                {
-                    var partialSubtitle = new SubtitleItem
-                    {
-                        SegmentId = item.Segment.Id,
-                        OriginalText = fastResult.Text,
-                        IsFinal = false
-                    };
-                    _overlayViewModel.AddOrUpdateSubtitle(partialSubtitle);
-                    Log($"[仮] {fastResult.Text}");
-                }
-
-                try
-                {
-                    await accurateWriter.WriteAsync(item, token);
-                }
-                catch (ChannelClosedException)
-                {
-                    if (IsRunning && !token.IsCancellationRequested)
-                    {
-                        Log($"高精度キューが閉じられたためセグメントを破棄しました (ID: {item.Segment.Id})");
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            accurateWriter.TryComplete();
-        }
-    }
-
-    private async Task ProcessAccurateQueueAsync(ChannelReader<SpeechSegmentWorkItem> reader, CancellationToken token)
-    {
-        var semaphore = new SemaphoreSlim(MaxAccurateParallelism);
+        var semaphore = new SemaphoreSlim(MaxTranslationParallelism);
         var pendingTasks = new List<Task>();
-        var buffer = new SortedDictionary<long, AccurateOutput>();
-        var bufferLock = new object();
-        var nextSequence = 1L;
-
-        void EnqueueOutput(AccurateOutput output)
-        {
-            lock (bufferLock)
-            {
-                buffer[output.Sequence] = output;
-
-                while (buffer.TryGetValue(nextSequence, out var next))
-                {
-                    buffer.Remove(nextSequence);
-                    if (next.TranslationLatencyMs.HasValue)
-                    {
-                        TranslationLatency = next.TranslationLatencyMs.Value;
-                    }
-
-                    if (next.Subtitle != null)
-                    {
-                        _overlayViewModel.AddOrUpdateSubtitle(next.Subtitle);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(next.LogMessage))
-                    {
-                        Log(next.LogMessage);
-                    }
-
-                    nextSequence++;
-                }
-            }
-        }
-
-        async Task HandleItemAsync(SpeechSegmentWorkItem item)
-        {
-            await semaphore.WaitAsync(token);
-            try
-            {
-                if (token.IsCancellationRequested || !IsRunning)
-                {
-                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
-                    return;
-                }
-
-                var accurateResult = await _asrService.TranscribeAccurateAsync(item.Segment);
-                if (token.IsCancellationRequested || !IsRunning)
-                {
-                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
-                    return;
-                }
-
-                if (string.IsNullOrWhiteSpace(accurateResult.Text))
-                {
-                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
-                    return;
-                }
-
-                var sourceLanguage = _settings.Translation.SourceLanguage;
-                var targetLanguage = _settings.Translation.TargetLanguage;
-                LoggerService.LogDebug($"[AccurateProcessingAsync] ASR結果: Text={accurateResult.Text}");
-
-                // Whisper翻訳サービスを使用する場合は、音声データから直接翻訳
-                string translatedTextFromAudio = string.Empty;
-                var isWhisperService = _translationService is Translation.Services.WhisperTranslationService;
-                LoggerService.LogDebug($"[AccurateProcessingAsync] 翻訳サービスタイプ: {_translationService.GetType().Name}, IsModelLoaded: {_translationService.IsModelLoaded}");
-
-                if (isWhisperService && _translationService.IsModelLoaded)
-                {
-                    var whisperTranslationService = (Translation.Services.WhisperTranslationService)_translationService;
-                    LoggerService.LogDebug($"[AccurateProcessingAsync] 音声データから直接翻訳を開始: AudioLength={item.Segment.AudioData.Length}");
-                    translatedTextFromAudio = await whisperTranslationService.TranslateAudioAsync(item.Segment.AudioData, sourceLanguage, targetLanguage);
-                    LoggerService.LogDebug($"[AccurateProcessingAsync] 音声翻訳結果: '{translatedTextFromAudio}'");
-                }
-                else
-                {
-                    LoggerService.LogDebug($"[AccurateProcessingAsync] Whisperサービスでない、またはモデルが未読み込み。テキスト翻訳にフォールバック");
-                }
-
-                // 音声翻訳に失敗した場合はテキスト翻訳にフォールバック
-                var translationResult = !string.IsNullOrEmpty(translatedTextFromAudio)
-                    ? new TranslationResult
-                    {
-                        OriginalText = accurateResult.Text,
-                        TranslatedText = translatedTextFromAudio,
-                        SourceLanguage = sourceLanguage,
-                        TargetLanguage = targetLanguage,
-                        FromCache = false,
-                        ProcessingTimeMs = 0
-                    }
-                    : await _translationService.TranslateAsync(accurateResult.Text, sourceLanguage, targetLanguage);
-
-                LoggerService.LogDebug($"[AccurateProcessingAsync] 翻訳完了: Original={accurateResult.Text}, Translated={translationResult.TranslatedText}, FromCache={translationResult.FromCache}, Time={translationResult.ProcessingTimeMs}ms");
-                if (token.IsCancellationRequested || !IsRunning)
-                {
-                    EnqueueOutput(new AccurateOutput(item.Sequence, null, null, null));
-                    return;
-                }
-
-                var finalSubtitle = new SubtitleItem
-                {
-                    SegmentId = item.Segment.Id,
-                    OriginalText = accurateResult.Text,
-                    TranslatedText = translationResult.TranslatedText,
-                    IsFinal = true
-                };
-                var logMessage = $"[確定] ({sourceLanguage}→{targetLanguage}) {accurateResult.Text} → {translationResult.TranslatedText}";
-                LoggerService.LogInfo(logMessage);
-                EnqueueOutput(new AccurateOutput(item.Sequence, finalSubtitle, logMessage, translationResult.ProcessingTimeMs));
-            }
-            catch (Exception ex)
-            {
-                var sourceLanguage = _settings.Translation.SourceLanguage;
-                var targetLanguage = _settings.Translation.TargetLanguage;
-                var logMessage = $"翻訳エラー ({sourceLanguage}→{targetLanguage}): {ex.Message}";
-                EnqueueOutput(new AccurateOutput(item.Sequence, null, logMessage, null));
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        }
 
         try
         {
@@ -698,29 +497,70 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (token.IsCancellationRequested || !IsRunning)
                 {
-                    break;
+                    return;
                 }
 
-                var task = Task.Run(() => HandleItemAsync(item), token);
+                await semaphore.WaitAsync(token);
+                var task = HandleTranslationItemAsync(item, semaphore, token);
                 pendingTasks.Add(task);
             }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            try
+
+            if (pendingTasks.Count > 0)
             {
                 await Task.WhenAll(pendingTasks);
             }
-            catch (OperationCanceledException)
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task HandleTranslationItemAsync(SpeechSegmentWorkItem item, SemaphoreSlim semaphore, CancellationToken token)
+    {
+        try
+        {
+            if (token.IsCancellationRequested || !IsRunning)
             {
+                return;
             }
-            finally
+
+            var sourceLanguage = _settings.Translation.SourceLanguage;
+            var targetLanguage = _settings.Translation.TargetLanguage;
+
+            // Whisper翻訳で音声を直接翻訳
+            string translatedText = string.Empty;
+            if (_translationService is Translation.Services.WhisperTranslationService whisperTranslationService && _translationService.IsModelLoaded)
             {
-                semaphore.Dispose();
+                var sw = Stopwatch.StartNew();
+                translatedText = await whisperTranslationService.TranslateAudioAsync(item.Segment.AudioData, sourceLanguage, targetLanguage);
+                sw.Stop();
+
+                TranslationLatency = sw.ElapsedMilliseconds;
+                LoggerService.LogDebug($"[翻訳処理] 完了: Result='{translatedText}', Time={sw.ElapsedMilliseconds}ms");
             }
+            else
+            {
+                LoggerService.LogWarning($"[翻訳処理] WhisperTranslationServiceが利用不可");
+            }
+
+            if (!string.IsNullOrWhiteSpace(translatedText))
+            {
+                var subtitle = new SubtitleItem
+                {
+                    SegmentId = item.Segment.Id,
+                    OriginalText = translatedText,
+                    TranslatedText = translatedText,
+                    IsFinal = true
+                };
+                _overlayViewModel.AddOrUpdateSubtitle(subtitle);
+                var logMessage = $"[確定] ({sourceLanguage}→{targetLanguage}) {translatedText}";
+                LoggerService.LogInfo(logMessage);
+                Log(logMessage);
+            }
+        }
+        finally
+        {
+            semaphore.Release();
         }
     }
 
@@ -998,8 +838,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _audioCaptureService.AudioDataAvailable -= OnAudioDataAvailable;
         _audioCaptureService.CaptureStatusChanged -= OnCaptureStatusChanged;
         _settingsViewModel.SettingsSaved -= OnSettingsSaved;
-        _asrService.ModelDownloadProgress -= OnModelDownloadProgress;
-        _asrService.ModelStatusChanged -= OnModelStatusChanged;
         _translationService.ModelDownloadProgress -= OnModelDownloadProgress;
         _translationService.ModelStatusChanged -= OnModelStatusChanged;
         _updateService.StatusChanged -= OnUpdateStatusChanged;
