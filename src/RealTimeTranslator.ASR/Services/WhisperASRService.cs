@@ -423,7 +423,7 @@ public class WhisperASRService : IASRService
             {
                 await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
                 totalRead += bytesRead;
-                var progress = totalBytes.HasValue && totalBytes.Value > 0
+                double? progress = totalBytes.HasValue && totalBytes.Value > 0
                     ? totalRead * 100d / totalBytes.Value
                     : null;
                 OnModelDownloadProgress(new ModelDownloadProgressEventArgs(

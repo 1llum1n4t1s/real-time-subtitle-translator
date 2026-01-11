@@ -80,7 +80,7 @@ public class UpdateService : IUpdateService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var source = new SimpleWebSource(new Uri(snapshot.FeedUrl));
-            using var manager = new UpdateManager(source);
+            var manager = new UpdateManager(source);
             var updateInfo = await manager.CheckForUpdatesAsync();
             if (updateInfo is null)
             {
@@ -132,7 +132,7 @@ public class UpdateService : IUpdateService
         try
         {
             var source = new SimpleWebSource(new Uri(feedUrl));
-            using var manager = new UpdateManager(source);
+            var manager = new UpdateManager(source);
             manager.ApplyUpdatesAndRestart(updateInfo);
         }
         catch (Exception ex)

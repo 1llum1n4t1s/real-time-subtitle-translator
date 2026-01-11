@@ -12,13 +12,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Whisper.net" Version="1.5.0" />
+    <PackageReference Include="Whisper.net" Version="1.9.0" />
     <!-- NVIDIA CUDA ランタイム -->
     <PackageReference Include="Whisper.net.Runtime.Cublas" Version="1.5.0" />
     <!-- AMD Vulkan ランタイム（採用） -->
-    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.5.0" />
+    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="10.0.1" />
   </ItemGroup>
 
 </Project>

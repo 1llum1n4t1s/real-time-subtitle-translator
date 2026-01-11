@@ -63,6 +63,69 @@ public class VADService : IVADService
     }
 
     /// <summary>
+    /// VADの感度設定（0.0～1.0）
+    /// </summary>
+    public float Sensitivity
+    {
+        get
+        {
+            lock (_settingsLock)
+            {
+                return _sensitivity;
+            }
+        }
+        set
+        {
+            lock (_settingsLock)
+            {
+                _sensitivity = Math.Clamp(value, 0.0f, 1.0f);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 最小発話長（秒）
+    /// </summary>
+    public float MinSpeechDuration
+    {
+        get
+        {
+            lock (_settingsLock)
+            {
+                return _minSpeechDuration;
+            }
+        }
+        set
+        {
+            lock (_settingsLock)
+            {
+                _minSpeechDuration = Math.Max(value, 0.0f);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 最大発話長（秒）
+    /// </summary>
+    public float MaxSpeechDuration
+    {
+        get
+        {
+            lock (_settingsLock)
+            {
+                return _maxSpeechDuration;
+            }
+        }
+        set
+        {
+            lock (_settingsLock)
+            {
+                _maxSpeechDuration = Math.Max(value, 0.0f);
+            }
+        }
+    }
+
+    /// <summary>
     /// 音声データを処理し、発話区間を検出
     /// </summary>
     public IEnumerable<SpeechSegment> DetectSpeech(float[] audioData)

@@ -221,19 +221,38 @@ public partial class MainViewModel : ObservableObject
         Processes.Clear();
 
         var activeProcessIds = GetActiveAudioProcessIds();
-        var processes = Process.GetProcesses()
-            .Where(p => activeProcessIds.Contains(p.Id))
-            .OrderBy(p => p.ProcessName)
-            .Select(p =>
-            {
-                var title = string.IsNullOrWhiteSpace(p.MainWindowTitle) ? p.ProcessName : p.MainWindowTitle;
-                return new ProcessInfo
+        IEnumerable<ProcessInfo> processes;
+
+        if (activeProcessIds.Count > 0)
+        {
+            // アクティブなオーディオプロセスのみを表示
+            processes = Process.GetProcesses()
+                .Where(p => activeProcessIds.Contains(p.Id))
+                .OrderBy(p => p.ProcessName)
+                .Select(p =>
+                {
+                    var title = string.IsNullOrWhiteSpace(p.MainWindowTitle) ? p.ProcessName : p.MainWindowTitle;
+                    return new ProcessInfo
+                    {
+                        Id = p.Id,
+                        Name = p.ProcessName,
+                        Title = title
+                    };
+                });
+        }
+        else
+        {
+            // フォールバック：メインウィンドウを持つプロセスを表示
+            processes = Process.GetProcesses()
+                .Where(p => p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrWhiteSpace(p.MainWindowTitle))
+                .OrderBy(p => p.ProcessName)
+                .Select(p => new ProcessInfo
                 {
                     Id = p.Id,
                     Name = p.ProcessName,
-                    Title = title
-                };
-            });
+                    Title = p.MainWindowTitle
+                });
+        }
 
         foreach (var process in processes)
         {
@@ -717,26 +736,45 @@ public partial class MainViewModel : ObservableObject
         Log($"選択プロセス '{process.DisplayName}' を設定ファイルに保存しました");
     }
 
+    /// <summary>
+    /// 現在オーディオをアクティブに再生しているプロセスのIDを取得する
+    /// </summary>
+    /// <returns>アクティブなオーディオプロセスのID一覧</returns>
     private static HashSet<int> GetActiveAudioProcessIds()
     {
         var processIds = new HashSet<int>();
-        using var enumerator = new MMDeviceEnumerator();
-        using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-        using var sessionManager = device.AudioSessionManager;
-        using var sessions = sessionManager.Sessions;
-
-        for (var i = 0; i < sessions.Count; i++)
+        try
         {
-            using var session = sessions[i];
-            if (session.State != AudioSessionState.AudioSessionStateActive)
-            {
-                continue;
-            }
+            using var enumerator = new MMDeviceEnumerator();
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            var sessionManager = device.AudioSessionManager;
+            var sessions = sessionManager.Sessions;
 
-            if (session is AudioSessionControl2 session2 && session2.ProcessID > 0)
+            for (var i = 0; i < sessions.Count; i++)
             {
-                processIds.Add((int)session2.ProcessID);
+                var session = sessions[i];
+                try
+                {
+                    // AudioSessionStateActive = 1
+                    if ((int)session.State == 1)
+                    {
+                        // ProcessIDはAudioSessionControlの派生型から取得
+                        var processIdProp = session.GetType().GetProperty("ProcessID");
+                        if (processIdProp?.GetValue(session) is uint processId && processId > 0)
+                        {
+                            processIds.Add((int)processId);
+                        }
+                    }
+                }
+                catch
+                {
+                    // 個別のセッション取得に失敗しても続行
+                }
             }
+        }
+        catch
+        {
+            // AudioSessionの取得に失敗した場合は空のセットを返す
         }
 
         return processIds;

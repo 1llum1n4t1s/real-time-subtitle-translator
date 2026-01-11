@@ -5,6 +5,9 @@
 *.userosscache
 *.sln.docstates
 
+# Visual Studio
+.vs/
+
 # Visual Studio Code
 .vscode/
 
@@ -20,3 +23,7 @@ models/
 
 # Logs
 logs/
+
+# Temporary files
+*.tmp
+build_output.txt
