@@ -15,8 +15,8 @@ public class LocalTranslationService : ITranslationService
 {
     private const string ServiceName = "翻訳";
     private const string ModelLabel = "翻訳モデル";
-    private const string DefaultModelFileName = "translate-en_ja.argosmodel";
-    private const string DefaultModelDownloadUrl = "https://www.argosopentech.com/argospm/translate-en_ja.argosmodel";
+    private const string DefaultModelFileName = "translate-en_ja-1_1.argosmodel";
+    private const string DefaultModelDownloadUrl = "https://argos-net.com/v1/translate-en_ja-1_1.argosmodel";
     private readonly TranslationSettings _settings;
     private readonly ModelDownloadService _downloadService;
     private readonly LruCache<string, string> _cache;
