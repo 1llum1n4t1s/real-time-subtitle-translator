@@ -24,6 +24,7 @@ public class AudioCaptureService : IAudioCaptureService
     private const int RetryIntervalMs = 1000; // リトライ間隔（ミリ秒）
     private const int FileNotFoundHResult = unchecked((int)0x80070002);
     private const int InvalidArgumentHResult = unchecked((int)0x80070057); // E_INVALIDARG
+    private const int MaxBufferSize = 48000; // 最大バッファサイズ（1秒分の48kHzオーディオ）
 
     private IWaveIn? _capture;
     private WaveFormat? _targetFormat;
@@ -453,6 +454,14 @@ public class AudioCaptureService : IAudioCaptureService
         lock (_bufferLock)
         {
             _audioBuffer.AddRange(samples);
+
+            // バッファサイズが上限を超えた場合は古いデータを削除
+            if (_audioBuffer.Count > MaxBufferSize)
+            {
+                var excessSamples = _audioBuffer.Count - MaxBufferSize;
+                _audioBuffer.RemoveRange(0, excessSamples);
+                LoggerService.LogDebug($"Audio buffer overflow prevented: removed {excessSamples} samples");
+            }
 
             // 一定量のデータが溜まったらイベントを発火
             var samplesPerChunk = targetSampleRate * AudioChunkDurationMs / 1000;
