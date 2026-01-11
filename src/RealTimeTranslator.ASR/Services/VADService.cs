@@ -165,21 +165,14 @@ public class VADService : IVADService
                     _silenceDuration = 0;
                 }
 
-                // Span を直接追加して配列変換を回避
-                foreach (var sample in frame)
-                {
-                    _currentSpeechBuffer.Add(sample);
-                }
+                _currentSpeechBuffer.AddRange(frame.ToArray());
                 _silenceDuration = 0;
             }
             else if (_isSpeaking)
             {
                 // 発話中の無音
                 _silenceDuration += frameDuration;
-                foreach (var sample in frame)
-                {
-                    _currentSpeechBuffer.Add(sample);
-                }
+                _currentSpeechBuffer.AddRange(frame.ToArray());
 
                 // 無音が閾値を超えたら発話終了
                 if (_silenceDuration >= silenceThreshold)

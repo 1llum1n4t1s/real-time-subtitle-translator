@@ -654,19 +654,7 @@ public partial class MainViewModel : ObservableObject
             _logLines.Dequeue();
         }
 
-        // StringBuilder を使用して効率的に文字列を結合
-        var sb = new StringBuilder();
-        var isFirst = true;
-        foreach (var line in _logLines)
-        {
-            if (!isFirst)
-            {
-                sb.Append(Environment.NewLine);
-            }
-            sb.Append(line);
-            isFirst = false;
-        }
-        LogText = sb.ToString();
+        LogText = string.Join(Environment.NewLine, _logLines);
     }
 
     private void OnModelDownloadProgress(object? sender, ModelDownloadProgressEventArgs e)
@@ -767,8 +755,8 @@ public partial class MainViewModel : ObservableObject
                 var session = sessions[i];
                 try
                 {
-                    // アクティブなオーディオセッションのみを対象とする
-                    if (session.State == AudioSessionState.AudioSessionStateActive)
+                    // AudioSessionStateActive = 1
+                    if ((int)session.State == 1)
                     {
                         // ProcessIDはAudioSessionControlの派生型から取得
                         var processIdProp = session.GetType().GetProperty("ProcessID");
