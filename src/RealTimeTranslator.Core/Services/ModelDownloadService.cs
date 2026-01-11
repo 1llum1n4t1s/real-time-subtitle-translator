@@ -69,18 +69,23 @@ public class ModelDownloadService : IDisposable
                 modelLabel,
                 ModelStatusType.LoadFailed,
                 "モデルパスの解決に失敗しました。"));
+            System.Diagnostics.Debug.WriteLine($"[{serviceName}] Failed to resolve model path. Input: {modelPath}, Default filename: {defaultFileName}");
             return null;
         }
 
         if (File.Exists(resolvedPath))
         {
+            var fileInfo = new FileInfo(resolvedPath);
             OnStatusChanged(new ModelStatusChangedEventArgs(
                 serviceName,
                 modelLabel,
                 ModelStatusType.Info,
-                "モデルファイルを検出しました。"));
+                $"モデルファイルを検出しました ({fileInfo.Length} bytes)。"));
+            System.Diagnostics.Debug.WriteLine($"[{serviceName}] Model file found at: {resolvedPath} (Size: {fileInfo.Length} bytes)");
             return resolvedPath;
         }
+
+        System.Diagnostics.Debug.WriteLine($"[{serviceName}] Model file not found at {resolvedPath}. Will attempt to download from {downloadUrl}");
 
         // URLを検証
         if (!IsValidDownloadUrl(downloadUrl))
@@ -123,7 +128,17 @@ public class ModelDownloadService : IDisposable
             return null;
         }
 
-        return File.Exists(resolvedPath) ? resolvedPath : null;
+        var finalCheck = File.Exists(resolvedPath);
+        if (!finalCheck)
+        {
+            System.Diagnostics.Debug.WriteLine($"[{serviceName}] ERROR: Model file still does not exist after download attempt. Path: {resolvedPath}");
+        }
+        else
+        {
+            var fileInfo = new FileInfo(resolvedPath);
+            System.Diagnostics.Debug.WriteLine($"[{serviceName}] Download completed successfully. File size: {fileInfo.Length} bytes");
+        }
+        return finalCheck ? resolvedPath : null;
     }
 
     private async Task DownloadModelAsync(
@@ -133,6 +148,8 @@ public class ModelDownloadService : IDisposable
         string modelLabel,
         CancellationToken cancellationToken)
     {
+        System.Diagnostics.Debug.WriteLine($"[{serviceName}] Starting download: URL={downloadUrl}, Target={targetPath}");
+
         using var response = await _httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -149,6 +166,8 @@ public class ModelDownloadService : IDisposable
         var buffer = new byte[DefaultBufferSize];
         long totalRead = 0;
         int bytesRead;
+
+        System.Diagnostics.Debug.WriteLine($"[{serviceName}] Content-Length: {totalBytes} bytes");
 
         OnStatusChanged(new ModelStatusChangedEventArgs(
             serviceName,
@@ -172,6 +191,7 @@ public class ModelDownloadService : IDisposable
         }
 
         Console.WriteLine($"Downloaded model to: {targetPath}");
+        System.Diagnostics.Debug.WriteLine($"[{serviceName}] Download complete: {totalRead} bytes written to {targetPath}");
         OnStatusChanged(new ModelStatusChangedEventArgs(
             serviceName,
             modelLabel,
