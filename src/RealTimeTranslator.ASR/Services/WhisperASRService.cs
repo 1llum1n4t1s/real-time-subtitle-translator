@@ -5,6 +5,7 @@ using RealTimeTranslator.Core.Models;
 using RealTimeTranslator.Core.Services;
 using Whisper.net;
 using Whisper.net.Ggml;
+using Whisper.net.LibraryLoader;
 
 namespace RealTimeTranslator.ASR.Services;
 
@@ -326,58 +327,113 @@ public class WhisperASRService : IASRService
         }
     }
 
+    /// <summary>
+    /// 音声データを処理して文字起こし結果を取得
+    /// </summary>
     private async Task<(string Text, float Confidence)> ProcessAudioAsync(WhisperProcessor processor, float[] audioData)
     {
         var segments = new List<string>();
         float totalConfidence = 0;
-        int segmentCount = 0;
+        var segmentCount = 0;
 
-        await foreach (var segment in processor.ProcessAsync(audioData))
+        try
         {
-            segments.Add(segment.Text.Trim());
-            totalConfidence += segment.Probability;
-            segmentCount++;
+            await foreach (var segment in processor.ProcessAsync(audioData))
+            {
+                segments.Add(segment.Text.Trim());
+                totalConfidence += segment.Probability;
+                segmentCount++;
+            }
+        }
+        catch (FileNotFoundException ex)
+        {
+            Debug.WriteLine($"ProcessAudioAsync: FileNotFoundException - {ex.FileName}");
+            Debug.WriteLine($"ProcessAudioAsync: Message - {ex.Message}");
+            Debug.WriteLine($"ProcessAudioAsync: StackTrace - {ex.StackTrace}");
+            throw;
         }
 
-        string text = string.Join(" ", segments);
-        float avgConfidence = segmentCount > 0 ? totalConfidence / segmentCount : 0;
+        var text = string.Join(" ", segments);
+        var avgConfidence = segmentCount > 0 ? totalConfidence / segmentCount : 0;
 
         return (text, avgConfidence);
     }
 
+    /// <summary>
+    /// 検出されたGPU種別を取得
+    /// </summary>
+    public GPUType DetectedGpuType { get; private set; } = GPUType.Auto;
+
+    /// <summary>
+    /// 検出されたGPU名を取得
+    /// </summary>
+    public string DetectedGpuName { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// GPUランタイムを設定
+    /// </summary>
     private void ConfigureGpuRuntime()
     {
         Debug.WriteLine($"ConfigureGpuRuntime: GPU.Enabled={_settings.GPU.Enabled}, GPU.Type={_settings.GPU.Type}, GPU.DeviceId={_settings.GPU.DeviceId}");
+
+        // 自動検出モードの場合、GPU種別を検出
+        if (_settings.GPU.Type == GPUType.Auto || _settings.GPU.Enabled)
+        {
+            Debug.WriteLine("ConfigureGpuRuntime: Auto detecting GPU type");
+            var (detectedType, gpuName) = DetectGpuTypeWithName();
+            DetectedGpuType = detectedType;
+            DetectedGpuName = gpuName;
+            LogGpuDetection(detectedType, gpuName);
+
+            // 自動検出の結果を設定に反映
+            if (_settings.GPU.Type == GPUType.Auto)
+            {
+                _settings.GPU.Type = detectedType;
+                // GPUが検出されなかった場合はGPUを無効化
+                if (detectedType == GPUType.CPU)
+                {
+                    _settings.GPU.Enabled = false;
+                    Debug.WriteLine("ConfigureGpuRuntime: No GPU detected, disabling GPU mode");
+                }
+            }
+        }
+
+        // GPU無効時はCPUモード
         if (!_settings.GPU.Enabled)
         {
-            Debug.WriteLine("ConfigureGpuRuntime: GPU disabled, clearing environment variables");
+            Debug.WriteLine("ConfigureGpuRuntime: GPU disabled, using CPU mode");
             Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
             Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
             return;
         }
 
         var effectiveGpuType = _settings.GPU.Type;
-        if (effectiveGpuType == GPUType.Auto)
-        {
-            Debug.WriteLine("ConfigureGpuRuntime: Auto detecting GPU type");
-            effectiveGpuType = DetectGpuType();
-            _settings.GPU.Type = effectiveGpuType;
-            LogGpuDetection(effectiveGpuType);
-        }
 
         switch (effectiveGpuType)
         {
-            case GPUType.AMD_Vulkan:
-                // Vulkan実行時はデバイス番号を環境変数で指定（Whisper.net.Runtime.Vulkan/ggml-vulkan）
-                Debug.WriteLine($"ConfigureGpuRuntime: Setting Vulkan device {_settings.GPU.DeviceId}");
-                Environment.SetEnvironmentVariable("GGML_VK_DEVICE", _settings.GPU.DeviceId.ToString());
-                Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
-                break;
             case GPUType.NVIDIA_CUDA:
-                // CUDA実行時はCUDAデバイスを指定（Whisper.net.Runtime.Cublas）
-                Debug.WriteLine($"ConfigureGpuRuntime: Setting CUDA device {_settings.GPU.DeviceId}");
+                // NVIDIA GeForce: CUDAランタイムのみ使用（Vulkanは除外）
+                Debug.WriteLine($"ConfigureGpuRuntime: Setting CUDA device {_settings.GPU.DeviceId} for NVIDIA GPU");
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", _settings.GPU.DeviceId.ToString());
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
+                // CUDA → CPU の優先順位（Vulkanは使用しない）
+                RuntimeOptions.RuntimeLibraryOrder = [
+                    RuntimeLibrary.Cuda,
+                    RuntimeLibrary.Cpu
+                ];
+                Debug.WriteLine("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Cuda, Cpu]");
+                break;
+            case GPUType.AMD_Vulkan:
+                // AMD Radeon: Vulkanランタイムを優先
+                Debug.WriteLine($"ConfigureGpuRuntime: Setting Vulkan device {_settings.GPU.DeviceId} for AMD GPU");
+                Environment.SetEnvironmentVariable("GGML_VK_DEVICE", _settings.GPU.DeviceId.ToString());
+                Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
+                // Vulkan → CPU の優先順位（CUDAは使用しない）
+                RuntimeOptions.RuntimeLibraryOrder = [
+                    RuntimeLibrary.Vulkan,
+                    RuntimeLibrary.Cpu
+                ];
+                Debug.WriteLine("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Vulkan, Cpu]");
                 break;
             case GPUType.CPU:
             case GPUType.Auto:
@@ -385,28 +441,47 @@ public class WhisperASRService : IASRService
                 Debug.WriteLine($"ConfigureGpuRuntime: Using CPU mode (effectiveGpuType={effectiveGpuType})");
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
+                // CPUのみ
+                RuntimeOptions.RuntimeLibraryOrder = [
+                    RuntimeLibrary.Cpu
+                ];
+                Debug.WriteLine("ConfigureGpuRuntime: RuntimeLibraryOrder set to [Cpu]");
                 break;
         }
     }
 
-    private static void LogGpuDetection(GPUType gpuType)
+    /// <summary>
+    /// GPU検出結果をログ出力
+    /// </summary>
+    private static void LogGpuDetection(GPUType gpuType, string gpuName)
     {
-        var message = $"検出したGPU種別: {gpuType}";
+        var runtimeInfo = gpuType switch
+        {
+            GPUType.NVIDIA_CUDA => "CUDA (Whisper.net.Runtime.Cuda)",
+            GPUType.AMD_Vulkan => "Vulkan (Whisper.net.Runtime.Vulkan)",
+            GPUType.CPU => "CPU (Whisper.net.Runtime)",
+            _ => "不明"
+        };
+        var message = $"検出したGPU: {gpuName}, 種別: {gpuType}, 使用ランタイム: {runtimeInfo}";
         Trace.WriteLine(message);
         Debug.WriteLine(message);
     }
 
-    private static GPUType DetectGpuType()
+    /// <summary>
+    /// GPU種別を検出（GPU名も取得）
+    /// </summary>
+    private static (GPUType Type, string Name) DetectGpuTypeWithName()
     {
         try
         {
             if (!OperatingSystem.IsWindows())
             {
-                return GPUType.CPU;
+                return (GPUType.CPU, "非Windows環境");
             }
 
-            var hasNvidia = false;
-            var hasAmd = false;
+            string? nvidiaName = null;
+            string? amdName = null;
+            var allGpuNames = new List<string>();
 
             using var searcher = new ManagementObjectSearcher("select Name from Win32_VideoController");
             foreach (var result in searcher.Get())
@@ -422,27 +497,40 @@ public class WhisperASRService : IASRService
                     continue;
                 }
 
-                if (name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))
+                allGpuNames.Add(name);
+                Debug.WriteLine($"DetectGpuTypeWithName: Found GPU: {name}");
+
+                if (name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("GeForce", StringComparison.OrdinalIgnoreCase))
                 {
-                    hasNvidia = true;
+                    nvidiaName ??= name;
                 }
 
-                if (name.Contains("AMD", StringComparison.OrdinalIgnoreCase)
-                    || name.Contains("Radeon", StringComparison.OrdinalIgnoreCase))
+                if (name.Contains("AMD", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("Radeon", StringComparison.OrdinalIgnoreCase))
                 {
-                    hasAmd = true;
+                    amdName ??= name;
                 }
             }
 
-            if (hasNvidia)
+            // NVIDIA GPUを優先
+            if (nvidiaName != null)
             {
-                return GPUType.NVIDIA_CUDA;
+                Debug.WriteLine($"DetectGpuTypeWithName: Selected NVIDIA GPU: {nvidiaName}");
+                return (GPUType.NVIDIA_CUDA, nvidiaName);
             }
 
-            if (hasAmd)
+            // AMD GPUを検出
+            if (amdName != null)
             {
-                return GPUType.AMD_Vulkan;
+                Debug.WriteLine($"DetectGpuTypeWithName: Selected AMD GPU: {amdName}");
+                return (GPUType.AMD_Vulkan, amdName);
             }
+
+            // 内蔵GPUのみの場合はCPUモード
+            var gpuSummary = allGpuNames.Count > 0 ? string.Join(", ", allGpuNames) : "なし";
+            Debug.WriteLine($"DetectGpuTypeWithName: No discrete GPU found, using CPU. Available GPUs: {gpuSummary}");
+            return (GPUType.CPU, gpuSummary);
         }
         catch (Exception ex)
         {
@@ -450,7 +538,16 @@ public class WhisperASRService : IASRService
             Debug.WriteLine($"GPU検出に失敗しました: {ex.Message}");
         }
 
-        return GPUType.CPU;
+        return (GPUType.CPU, "検出エラー");
+    }
+
+    /// <summary>
+    /// GPU種別を検出（後方互換性のため維持）
+    /// </summary>
+    private static GPUType DetectGpuType()
+    {
+        var (gpuType, _) = DetectGpuTypeWithName();
+        return gpuType;
     }
 
     private void ValidateModelCompatibility(string? fastModelPath, string? accurateModelPath)
@@ -479,19 +576,108 @@ public class WhisperASRService : IASRService
         }
     }
 
+    /// <summary>
+    /// モデルファイルを確認し、必要に応じてWhisperGgmlDownloaderでダウンロード
+    /// </summary>
     private async Task<string?> EnsureModelAsync(
         string modelPath,
         string defaultFileName,
         string downloadUrl,
         string modelLabel)
     {
-        return await _downloadService.EnsureModelAsync(
+        // まずModelDownloadServiceで確認
+        var resolvedPath = await _downloadService.EnsureModelAsync(
             modelPath,
             defaultFileName,
             downloadUrl,
             ServiceName,
             modelLabel,
             CancellationToken.None);
+
+        // ファイルが存在しない場合、WhisperGgmlDownloaderでダウンロード
+        if (string.IsNullOrEmpty(resolvedPath) || !File.Exists(resolvedPath))
+        {
+            resolvedPath = await DownloadModelWithWhisperGgmlAsync(defaultFileName, modelLabel);
+        }
+
+        return resolvedPath;
+    }
+
+    /// <summary>
+    /// WhisperGgmlDownloaderを使用してモデルをダウンロード
+    /// </summary>
+    private async Task<string?> DownloadModelWithWhisperGgmlAsync(string defaultFileName, string modelLabel)
+    {
+        try
+        {
+            var ggmlType = GetGgmlTypeFromFileName(defaultFileName);
+            if (ggmlType == null)
+            {
+                Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Unknown model type for {defaultFileName}");
+                return null;
+            }
+
+            var modelsDir = Path.Combine(AppContext.BaseDirectory, "models");
+            if (!Directory.Exists(modelsDir))
+            {
+                Directory.CreateDirectory(modelsDir);
+            }
+
+            var targetPath = Path.Combine(modelsDir, defaultFileName);
+
+            OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                ServiceName,
+                modelLabel,
+                ModelStatusType.Downloading,
+                $"WhisperGgmlDownloaderで{modelLabel}をダウンロード中..."));
+
+            Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Downloading {ggmlType.Value} to {targetPath}");
+
+            using var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(ggmlType.Value);
+            await using var fileWriter = File.Create(targetPath);
+            await modelStream.CopyToAsync(fileWriter);
+
+            Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Downloaded successfully to {targetPath}");
+
+            OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                ServiceName,
+                modelLabel,
+                ModelStatusType.DownloadCompleted,
+                $"{modelLabel}のダウンロードが完了しました。"));
+
+            return targetPath;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"DownloadModelWithWhisperGgmlAsync: Error - {ex.Message}");
+            OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                ServiceName,
+                modelLabel,
+                ModelStatusType.DownloadFailed,
+                $"{modelLabel}のダウンロードに失敗しました: {ex.Message}",
+                ex));
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// ファイル名からGgmlTypeを取得
+    /// </summary>
+    private static GgmlType? GetGgmlTypeFromFileName(string fileName)
+    {
+        return fileName.ToLowerInvariant() switch
+        {
+            "ggml-tiny.bin" => GgmlType.Tiny,
+            "ggml-base.bin" => GgmlType.Base,
+            "ggml-small.bin" => GgmlType.Small,
+            "ggml-medium.bin" => GgmlType.Medium,
+            "ggml-large.bin" => GgmlType.LargeV1,
+            "ggml-large-v1.bin" => GgmlType.LargeV1,
+            "ggml-large-v2.bin" => GgmlType.LargeV2,
+            "ggml-large-v3.bin" => GgmlType.LargeV3,
+            "ggml-large-v3-turbo.bin" => GgmlType.LargeV3Turbo,
+            _ => null
+        };
     }
 
     private void OnModelStatusChanged(ModelStatusChangedEventArgs args)

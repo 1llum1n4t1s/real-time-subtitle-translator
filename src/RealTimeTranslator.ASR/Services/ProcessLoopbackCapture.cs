@@ -172,13 +172,29 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
     private static void ActivateAudioInterface(MMDevice device, ref Guid iid, PropVariant activationParams, out IAudioClient3 audioClient)
     {
         var completionHandler = new ActivateCompletionHandler();
-        var hr = ActivateAudioInterfaceAsync(device.ID, ref iid, activationParams, completionHandler, out var result);
-        if (hr != 0)
-            Marshal.ThrowExceptionForHR(hr);
+        try
+        {
+            var hr = ActivateAudioInterfaceAsync(device.ID, ref iid, activationParams, completionHandler, out var result);
+            if (hr != 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"ActivateAudioInterfaceAsync failed: HRESULT={hr:X8}");
+                Marshal.ThrowExceptionForHR(hr);
+            }
 
-        completionHandler.WaitForCompletion();
-        audioClient = completionHandler.GetActivatedInterface();
-        Marshal.ReleaseComObject(result);
+            completionHandler.WaitForCompletion();
+            audioClient = completionHandler.GetActivatedInterface();
+            Marshal.ReleaseComObject(result);
+        }
+        catch (TimeoutException tex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Audio client activation timeout: {tex.Message}");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Audio client activation error: {ex.GetType().Name} - {ex.Message}");
+            throw;
+        }
     }
 
     private static IAudioCaptureClient GetCaptureClient(IAudioClient3 audioClient)
@@ -404,28 +420,41 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
 
     private sealed class ActivateCompletionHandler : IActivateAudioInterfaceCompletionHandler
     {
+        private const int ActivationTimeoutMs = 5000; // アクティベーションタイムアウト（5秒）
         private readonly ManualResetEventSlim _completedEvent = new(false);
         private int _activateResult;
         private IAudioClient3? _audioClient;
 
         public void ActivateCompleted(IActivateAudioInterfaceAsyncOperation operation)
         {
-            operation.GetActivateResult(out _activateResult, out var activatedInterface);
-            if (_activateResult == 0)
+            try
             {
-                _audioClient = (IAudioClient3)activatedInterface;
+                operation.GetActivateResult(out _activateResult, out var activatedInterface);
+                if (_activateResult == 0)
+                {
+                    _audioClient = (IAudioClient3)activatedInterface;
+                }
+                else if (activatedInterface != null)
+                {
+                    Marshal.ReleaseComObject(activatedInterface);
+                }
             }
-            else if (activatedInterface != null)
+            finally
             {
-                Marshal.ReleaseComObject(activatedInterface);
+                _completedEvent.Set();
             }
-
-            _completedEvent.Set();
         }
 
+        /// <summary>
+        /// アクティベーション完了を待機（タイムアウト付き）
+        /// </summary>
         public void WaitForCompletion()
         {
-            _completedEvent.Wait();
+            if (!_completedEvent.Wait(ActivationTimeoutMs))
+            {
+                throw new TimeoutException($"Audio client activation timed out after {ActivationTimeoutMs}ms");
+            }
+
             if (_activateResult != 0)
             {
                 Marshal.ThrowExceptionForHR(_activateResult);

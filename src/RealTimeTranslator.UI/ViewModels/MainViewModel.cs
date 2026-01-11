@@ -37,6 +37,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly SettingsFilePath _settingsFilePath;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly Queue<string> _logLines = new();
+    private string? _lastLogMessage;
     private CancellationTokenSource? _processingCancellation;
     private Channel<SpeechSegmentWorkItem>? _segmentChannel;
     private Channel<SpeechSegmentWorkItem>? _accurateChannel;
@@ -68,7 +69,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _logText = string.Empty;
 
-    public bool CanStart => SelectedProcess != null && !IsRunning;
+    [ObservableProperty]
+    private bool _isLoading = true;
+
+    [ObservableProperty]
+    private string _loadingMessage = "初期化中...";
+
+    /// <summary>
+    /// 開始ボタンが有効かどうか
+    /// </summary>
+    public bool CanStart => SelectedProcess != null && !IsRunning && !IsLoading;
 
     public MainViewModel(
         IAudioCaptureService audioCaptureService,
@@ -95,6 +105,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // 音声データ受信時の処理
         _audioCaptureService.AudioDataAvailable += OnAudioDataAvailable;
+        _audioCaptureService.CaptureStatusChanged += OnCaptureStatusChanged;
         _settingsViewModel.SettingsSaved += OnSettingsSaved;
         _asrService.ModelDownloadProgress += OnModelDownloadProgress;
         _asrService.ModelStatusChanged += OnModelStatusChanged;
@@ -317,8 +328,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             await StartProcessingPipelinesAsync(_processingCancellation.Token);
 
-            // キャプチャ開始
-            _audioCaptureService.StartCapture(SelectedProcess.Id);
+            // キャプチャ開始（オーディオセッションが見つかるまで待機）
+            StatusText = "音声の再生を待機中...";
+            StatusColor = Brushes.Orange;
+            Log($"'{SelectedProcess.DisplayName}' (PID: {SelectedProcess.Id}) の音声再生を待機しています...");
+            Debug.WriteLine($"StartAsync: Starting audio capture for process: {SelectedProcess.Name} (ID: {SelectedProcess.Id}, Title: {SelectedProcess.Title})");
+
+            var captureStarted = await _audioCaptureService.StartCaptureWithRetryAsync(
+                SelectedProcess.Id,
+                _processingCancellation.Token);
+
+            if (!captureStarted)
+            {
+                // キャンセルされた場合
+                await StopProcessingPipelinesAsync();
+                IsRunning = false;
+                StatusText = "停止中";
+                StatusColor = Brushes.Gray;
+                Log("音声キャプチャがキャンセルされました。");
+                return;
+            }
 
             StatusText = "実行中";
             StatusColor = Brushes.Green;
@@ -329,7 +358,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsRunning = false;
             StatusText = "エラー";
             StatusColor = Brushes.Red;
-            Log($"エラー: {ex.Message}");
+            Log($"エラー: {ex.GetType().Name}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"StartAsync Error: {ex.GetType().FullName}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");
+            if (ex.InnerException != null)
+            {
+                Log($"内部エラー: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                System.Diagnostics.Debug.WriteLine($"InnerException: {ex.InnerException.GetType().FullName}: {ex.InnerException.Message}");
+            }
         }
     }
 
@@ -642,8 +678,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void Log(string message)
+    private void Log(string message, bool suppressDuplicate = false)
     {
+        // 重複メッセージの抑制（ダウンロード進捗など）
+        if (suppressDuplicate)
+        {
+            // メッセージのベース部分を抽出（数値部分を除外して比較）
+            var baseMessage = ExtractBaseMessage(message);
+            var lastBaseMessage = _lastLogMessage != null ? ExtractBaseMessage(_lastLogMessage) : null;
+
+            if (baseMessage == lastBaseMessage)
+            {
+                // ベース部分が同じ場合はスキップ
+                return;
+            }
+        }
+
+        _lastLogMessage = message;
+
         var timestamp = DateTime.Now.ToString("HH:mm:ss");
         var logLine = $"[{timestamp}] {message}";
 
@@ -665,6 +717,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         LogText = sb.ToString();
     }
 
+    /// <summary>
+    /// メッセージから数値・パーセント部分を除去してベース部分を抽出
+    /// </summary>
+    private static string ExtractBaseMessage(string message)
+    {
+        // 数値とパーセント記号を除去してベース部分を比較
+        return System.Text.RegularExpressions.Regex.Replace(message, @"[\d.]+%?", "").Trim();
+    }
+
     private void OnModelDownloadProgress(object? sender, ModelDownloadProgressEventArgs e)
     {
         var progressText = e.ProgressPercentage.HasValue
@@ -672,7 +733,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             : "進捗不明";
         StatusText = $"{e.ServiceName} {e.ModelName} ダウンロード中... {progressText}";
         StatusColor = Brushes.Orange;
-        Log($"{e.ServiceName} {e.ModelName} ダウンロード進行中: {progressText}");
+        // suppressDuplicate: true で連続するダウンロード進捗メッセージを抑制
+        Log($"{e.ServiceName} {e.ModelName} ダウンロード進行中: {progressText}", suppressDuplicate: true);
     }
 
     private void OnModelStatusChanged(object? sender, ModelStatusChangedEventArgs e)
@@ -686,6 +748,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? Brushes.Red
             : Brushes.Orange;
         Log($"{e.ServiceName} {e.ModelName}: {message}");
+    }
+
+    private void OnCaptureStatusChanged(object? sender, CaptureStatusEventArgs e)
+    {
+        RunOnUiThread(() =>
+        {
+            if (e.IsWaiting)
+            {
+                StatusText = e.Message;
+                StatusColor = Brushes.Orange;
+            }
+            // 待機中のメッセージは連続で表示しない
+            Log(e.Message, suppressDuplicate: e.IsWaiting);
+        });
     }
 
     private static string FormatExceptionMessage(Exception ex)
@@ -714,6 +790,75 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnIsRunningChanged(bool value)
     {
         OnPropertyChanged(nameof(CanStart));
+    }
+
+    partial void OnIsLoadingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanStart));
+    }
+
+    /// <summary>
+    /// モデルを初期化（起動時に呼び出される）
+    /// </summary>
+    /// <summary>
+    /// モデルを初期化（起動時に呼び出される）
+    /// ASRと翻訳モデルを並列ダウンロード・読み込み
+    /// </summary>
+    public async Task InitializeModelsAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            Log("モデルの初期化を開始します...");
+
+            // ASRと翻訳モデルを並列初期化
+            var asrTask = Task.Run(async () =>
+            {
+                try
+                {
+                    LoadingMessage = "ASRモデルをダウンロード中...";
+                    await _asrService.InitializeAsync();
+                    System.Diagnostics.Debug.WriteLine("ASR model initialization completed");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ASR initialization error: {ex.Message}");
+                    throw;
+                }
+            });
+
+            var translationTask = Task.Run(async () =>
+            {
+                try
+                {
+                    LoadingMessage = "翻訳モデルをダウンロード中...";
+                    await _translationService.InitializeAsync();
+                    System.Diagnostics.Debug.WriteLine("Translation model initialization completed");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Translation initialization error: {ex.Message}");
+                    throw;
+                }
+            });
+
+            // 両方の初期化が完了するまで待機
+            await Task.WhenAll(asrTask, translationTask);
+
+            LoadingMessage = "準備完了";
+            Log("モデルの初期化が完了しました。");
+            System.Diagnostics.Debug.WriteLine("All models initialized successfully");
+        }
+        catch (Exception ex)
+        {
+            LoadingMessage = $"初期化エラー: {ex.Message}";
+            Log($"モデル初期化エラー: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"モデル初期化エラー: {ex}");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private void RestoreLastSelectedProcess()
@@ -807,6 +952,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // イベントハンドラの登録解除
         _audioCaptureService.AudioDataAvailable -= OnAudioDataAvailable;
+        _audioCaptureService.CaptureStatusChanged -= OnCaptureStatusChanged;
         _settingsViewModel.SettingsSaved -= OnSettingsSaved;
         _asrService.ModelDownloadProgress -= OnModelDownloadProgress;
         _asrService.ModelStatusChanged -= OnModelStatusChanged;

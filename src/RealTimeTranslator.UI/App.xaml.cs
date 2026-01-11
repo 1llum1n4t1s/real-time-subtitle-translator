@@ -48,29 +48,6 @@ public partial class App : Application
             _serviceProvider = services.BuildServiceProvider();
             System.Diagnostics.Debug.WriteLine("OnStartup: DI構築完了");
 
-            // モデルをアプリ起動時に初期化（バックグラウンドで実行）
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    System.Diagnostics.Debug.WriteLine("OnStartup: モデル初期化開始");
-                    var asrService = _serviceProvider.GetRequiredService<IASRService>();
-                    var translationService = _serviceProvider.GetRequiredService<ITranslationService>();
-
-                    // 並列で初期化
-                    await Task.WhenAll(
-                        asrService.InitializeAsync(),
-                        translationService.InitializeAsync()
-                    );
-                    System.Diagnostics.Debug.WriteLine("OnStartup: モデル初期化完了");
-                }
-                catch (Exception ex)
-                {
-                    // エラーをログに記録（UIには表示しない）
-                    System.Diagnostics.Debug.WriteLine($"モデル初期化エラー: {ex}");
-                }
-            });
-
             var updateService = _serviceProvider.GetRequiredService<IUpdateService>();
             updateService.UpdateSettings(settings.Update);
             _updateCancellation = new CancellationTokenSource();
@@ -90,6 +67,9 @@ public partial class App : Application
             System.Diagnostics.Debug.WriteLine("OnStartup: メインウィンドウ表示");
 
             MainWindow = mainWindow;
+
+            // モデルをバックグラウンドで初期化（UIスレッドで開始してawaitしない）
+            _ = mainViewModel.InitializeModelsAsync();
             System.Diagnostics.Debug.WriteLine("OnStartup: 起動完了");
         }
         catch (Exception ex)
@@ -125,7 +105,7 @@ public partial class App : Application
         services.AddSingleton<IAudioCaptureService, AudioCaptureService>();
         services.AddSingleton<IVADService, VADService>();
         services.AddSingleton<IASRService, WhisperASRService>();
-        services.AddSingleton<ITranslationService, LocalTranslationService>();
+        services.AddSingleton<ITranslationService, OnnxTranslationService>();
         services.AddSingleton<IUpdateService, UpdateService>();
 
         // ViewModels

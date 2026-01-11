@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using NAudio.Wave;
 using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Models;
@@ -18,18 +20,32 @@ public class AudioCaptureService : IAudioCaptureService
     private const float Int16MaxValue = 32768f; // 16-bit PCMの最大値
     private const int BitsPerSample16 = 16;
     private const int BitsPerSample32 = 32;
+    private const int RetryIntervalMs = 1000; // リトライ間隔（ミリ秒）
+    private const int FileNotFoundHResult = unchecked((int)0x80070002);
 
     private IWaveIn? _capture;
     private WaveFormat? _targetFormat;
     private readonly AudioCaptureSettings _settings;
-    private readonly List<float> _audioBuffer = new();
+    private readonly List<float> _audioBuffer = [];
     private readonly object _bufferLock = new();
     private bool _isCapturing;
     private bool _isDisposed;
     private int _targetProcessId;
 
+    /// <summary>
+    /// キャプチャ中かどうか
+    /// </summary>
     public bool IsCapturing => _isCapturing;
+
+    /// <summary>
+    /// 音声データが利用可能になったときに発火するイベント
+    /// </summary>
     public event EventHandler<AudioDataEventArgs>? AudioDataAvailable;
+
+    /// <summary>
+    /// キャプチャ状態が変化したときに発火するイベント
+    /// </summary>
+    public event EventHandler<CaptureStatusEventArgs>? CaptureStatusChanged;
 
     public AudioCaptureService(AudioCaptureSettings? settings = null)
     {
@@ -81,6 +97,147 @@ public class AudioCaptureService : IAudioCaptureService
 
         _capture.StartRecording();
         _isCapturing = true;
+    }
+
+    /// <summary>
+    /// 指定したプロセスIDの音声キャプチャを開始（オーディオセッションが見つかるまで待機）
+    /// </summary>
+    public async Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken)
+    {
+        if (processId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(processId), "プロセスIDは正の値で指定してください。");
+
+        if (_capture != null)
+            StopCapture();
+
+        _targetProcessId = processId;
+        _audioBuffer.Clear();
+
+        var retryCount = 0;
+        var retryStopwatch = Stopwatch.StartNew();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                // Windows Core Audio API(AudioClientActivationParams/IAudioClient3)で対象プロセスのみを初期化する
+                _capture = new ProcessLoopbackCapture(_targetProcessId);
+                _capture.DataAvailable += OnDataAvailable;
+                _capture.RecordingStopped += OnRecordingStopped;
+
+                _capture.StartRecording();
+                _isCapturing = true;
+
+                OnCaptureStatusChanged("音声キャプチャを開始しました。", false);
+                Debug.WriteLine($"StartCaptureWithRetryAsync: Successfully started capture for process {processId}");
+                return true;
+            }
+            catch (COMException ex) when (ex.HResult == FileNotFoundHResult)
+            {
+                // オーディオセッションが見つからない場合は待機して再試行
+                retryCount++;
+                var elapsedSeconds = Math.Round(retryStopwatch.Elapsed.TotalSeconds, 1);
+                var message = $"音声の再生を待機中... ({elapsedSeconds}秒)";
+                OnCaptureStatusChanged(message, true);
+                Debug.WriteLine($"StartCaptureWithRetryAsync: Audio session not found (HRESULT 0x80070002) for process {processId}, waiting... (attempt {retryCount}, elapsed {elapsedSeconds}s)");
+
+                // キャプチャオブジェクトをクリーンアップ
+                CleanupCapture();
+
+                try
+                {
+                    await Task.Delay(RetryIntervalMs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
+                    return false;
+                }
+            }
+            catch (FileNotFoundException fex)
+            {
+                // FileNotFoundExceptionもキャッチ（HRESULT 0x80070002）
+                retryCount++;
+                var elapsedSeconds = Math.Round(retryStopwatch.Elapsed.TotalSeconds, 1);
+                var message = $"音声の再生を待機中... ({elapsedSeconds}秒)";
+                OnCaptureStatusChanged(message, true);
+                Debug.WriteLine($"StartCaptureWithRetryAsync: FileNotFoundException for process {processId}: {fex.Message}, waiting... (attempt {retryCount}, elapsed {elapsedSeconds}s)");
+
+                // キャプチャオブジェクトをクリーンアップ
+                CleanupCapture();
+
+                try
+                {
+                    await Task.Delay(RetryIntervalMs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
+                    return false;
+                }
+
+                continue;
+            }
+            catch (TimeoutException tex)
+            {
+                // オーディオインターフェース激活タイムアウト
+                retryCount++;
+                var elapsedSeconds = Math.Round(retryStopwatch.Elapsed.TotalSeconds, 1);
+                var message = $"音声の再生を待機中... ({elapsedSeconds}秒)";
+                OnCaptureStatusChanged(message, true);
+                Debug.WriteLine($"StartCaptureWithRetryAsync: Activation timeout for process {processId}: {tex.Message}, waiting... (attempt {retryCount}, elapsed {elapsedSeconds}s)");
+
+                // キャプチャオブジェクトをクリーンアップ
+                CleanupCapture();
+
+                try
+                {
+                    await Task.Delay(RetryIntervalMs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
+                    return false;
+                }
+
+                continue;
+            }
+            catch (Exception ex)
+            {
+                // その他のエラーは再スロー
+                Debug.WriteLine($"StartCaptureWithRetryAsync: Unexpected error - {ex.GetType().Name}: {ex.Message}");
+                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                CleanupCapture();
+                throw;
+            }
+        }
+
+        OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
+        return false;
+    }
+
+    /// <summary>
+    /// キャプチャオブジェクトをクリーンアップ
+    /// </summary>
+    private void CleanupCapture()
+    {
+        if (_capture != null)
+        {
+            _capture.DataAvailable -= OnDataAvailable;
+            _capture.RecordingStopped -= OnRecordingStopped;
+            if (_capture is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+            _capture = null;
+        }
+    }
+
+    /// <summary>
+    /// キャプチャ状態変更イベントを発火
+    /// </summary>
+    private void OnCaptureStatusChanged(string message, bool isWaiting)
+    {
+        CaptureStatusChanged?.Invoke(this, new CaptureStatusEventArgs(message, isWaiting));
     }
 
     /// <summary>

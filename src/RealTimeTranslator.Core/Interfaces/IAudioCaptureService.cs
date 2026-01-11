@@ -15,6 +15,14 @@ public interface IAudioCaptureService : IDisposable
     void StartCapture(int processId);
 
     /// <summary>
+    /// 指定したプロセスIDの音声キャプチャを開始（オーディオセッションが見つかるまで待機）
+    /// </summary>
+    /// <param name="processId">対象プロセスID</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <returns>キャプチャ開始に成功したかどうか</returns>
+    Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// 音声キャプチャを停止
     /// </summary>
     void StopCapture();
@@ -34,6 +42,36 @@ public interface IAudioCaptureService : IDisposable
     /// 音声データが利用可能になったときに発火するイベント
     /// </summary>
     event EventHandler<AudioDataEventArgs>? AudioDataAvailable;
+
+    /// <summary>
+    /// キャプチャ状態が変化したときに発火するイベント
+    /// </summary>
+    event EventHandler<CaptureStatusEventArgs>? CaptureStatusChanged;
+}
+
+/// <summary>
+/// キャプチャ状態変更イベント引数
+/// </summary>
+public class CaptureStatusEventArgs : EventArgs
+{
+    /// <summary>
+    /// ステータスメッセージ
+    /// </summary>
+    public string Message { get; }
+
+    /// <summary>
+    /// オーディオセッション待機中かどうか
+    /// </summary>
+    public bool IsWaiting { get; }
+
+    /// <summary>
+    /// コンストラクタ
+    /// </summary>
+    public CaptureStatusEventArgs(string message, bool isWaiting = false)
+    {
+        Message = message;
+        IsWaiting = isWaiting;
+    }
 }
 
 /// <summary>

@@ -60,24 +60,18 @@ public class LocalTranslationService : ITranslationService
             ModelStatusType.Info,
             "翻訳モデルの初期化を開始しました。"));
 
-        var modelPath = ResolveModelPath();
-        if (modelPath == null)
-        {
-            await TryDownloadModelAsync();
-            modelPath = ResolveModelPath();
-        }
-
         await Task.Run(() =>
         {
+            var modelPath = ResolveModelPath();
             if (modelPath == null)
             {
-                Console.WriteLine($"Translation model not found at: {GetModelRootPath()}");
-                Console.WriteLine("Running in fallback mode (no actual translation)");
+                System.Diagnostics.Debug.WriteLine($"Translation model not found at: {GetModelRootPath()}");
+                // 翻訳ライブラリが未実装のため、原文表示モードで動作
                 OnModelStatusChanged(new ModelStatusChangedEventArgs(
                     ServiceName,
                     ModelLabel,
                     ModelStatusType.Fallback,
-                    "翻訳モデルが見つからないためタグ付け翻訳で継続します。"));
+                    "翻訳機能は現在未実装です。原文表示モードで動作します。"));
                 _isModelLoaded = false;
                 return;
             }
@@ -85,12 +79,8 @@ public class LocalTranslationService : ITranslationService
             _isModelLoaded = TryLoadArgosModel(modelPath, _settings.SourceLanguage, _settings.TargetLanguage);
             if (!_isModelLoaded)
             {
-                Console.WriteLine("Argos Translate model load failed. Running in fallback mode.");
-                OnModelStatusChanged(new ModelStatusChangedEventArgs(
-                    ServiceName,
-                    ModelLabel,
-                    ModelStatusType.Fallback,
-                    "翻訳モデルの読み込みに失敗したためタグ付け翻訳で継続します。"));
+                System.Diagnostics.Debug.WriteLine($"Argos Translate model load failed. modelPath={modelPath}");
+                // ステータス変更イベントはTryLoadArgosModel内で発火済みの場合があるのでスキップ
             }
             else
             {
@@ -247,40 +237,73 @@ public class LocalTranslationService : ITranslationService
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel: modelPath={modelPath}, src={sourceLanguage}, tgt={targetLanguage}");
+
             var packageType = Type.GetType("ArgosTranslate.Models.Package, ArgosTranslate.NET");
             if (packageType == null)
             {
+                System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: ArgosTranslate.Models.Package type not found - translation library not installed");
+                OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                    ServiceName,
+                    ModelLabel,
+                    ModelStatusType.Fallback,
+                    "翻訳ライブラリ未実装のため原文表示モードで動作します。"));
                 return false;
             }
 
-            var loadFromMethod = packageType.GetMethod("LoadFrom", new[] { typeof(string) });
+            var loadFromMethod = packageType.GetMethod("LoadFrom", [typeof(string)]);
             if (loadFromMethod == null)
             {
+                System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: LoadFrom method not found");
+                OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                    ServiceName,
+                    ModelLabel,
+                    ModelStatusType.LoadFailed,
+                    "LoadFromメソッドが見つかりません。"));
                 return false;
             }
 
-            var package = loadFromMethod.Invoke(null, new object[] { modelPath });
+            var package = loadFromMethod.Invoke(null, [modelPath]);
             if (package == null)
             {
+                System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel: Package.LoadFrom returned null for path: {modelPath}");
+                OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                    ServiceName,
+                    ModelLabel,
+                    ModelStatusType.LoadFailed,
+                    $"翻訳モデルの読み込みに失敗しました: {modelPath}"));
                 return false;
             }
 
             var installMethod = packageType.GetMethod("Install", Type.EmptyTypes);
             installMethod?.Invoke(package, null);
+            System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: Package installed");
 
-            var getTranslationMethod = packageType.GetMethod("GetTranslation", new[] { typeof(string), typeof(string) });
+            var getTranslationMethod = packageType.GetMethod("GetTranslation", [typeof(string), typeof(string)]);
             _translationModel = getTranslationMethod != null
-                ? getTranslationMethod.Invoke(package, new object[] { sourceLanguage, targetLanguage })
+                ? getTranslationMethod.Invoke(package, [sourceLanguage, targetLanguage])
                 : package;
 
             if (_translationModel == null)
             {
+                System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel: GetTranslation returned null for {sourceLanguage}->{targetLanguage}");
+                OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                    ServiceName,
+                    ModelLabel,
+                    ModelStatusType.LoadFailed,
+                    $"翻訳モデルが{sourceLanguage}→{targetLanguage}に対応していません。"));
                 return false;
             }
 
-            var translateMethod = _translationModel.GetType().GetMethod("Translate", new[] { typeof(string) });
+            var translateMethod = _translationModel.GetType().GetMethod("Translate", [typeof(string)]);
             if (translateMethod == null)
             {
+                System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: Translate method not found");
+                OnModelStatusChanged(new ModelStatusChangedEventArgs(
+                    ServiceName,
+                    ModelLabel,
+                    ModelStatusType.LoadFailed,
+                    "Translateメソッドが見つかりません。"));
                 return false;
             }
 
@@ -288,11 +311,12 @@ public class LocalTranslationService : ITranslationService
                 typeof(Func<string, string>),
                 _translationModel);
 
+            System.Diagnostics.Debug.WriteLine("TryLoadArgosModel: Successfully loaded");
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Argos Translate initialization error: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"TryLoadArgosModel error: {ex}");
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
                 ModelLabel,
