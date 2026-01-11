@@ -121,7 +121,7 @@ GitHub Actions による公開手順は `docs/release_guide.md` を参照して�
 |----------|------|----------------|
 | `ggml-small.bin` | 低遅延ASR | [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) |
 | `ggml-large-v3.bin` | 高精度ASR | [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) |
-| `translate-en_ja.argosmodel` | 翻訳モデル | [Argos Translate](https://www.argosopentech.com/argospm/translate-en_ja.argosmodel) |
+| `translate-en_ja-1_1.argosmodel` | 翻訳モデル | [Argos Translate](https://argos-net.com/v1/translate-en_ja-1_1.argosmodel) |
 
 ## 設定ファイル
 

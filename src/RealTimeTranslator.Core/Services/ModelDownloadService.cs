@@ -279,7 +279,8 @@ public class ModelDownloadService : IDisposable
         var trustedHosts = new[]
         {
             "huggingface.co",
-            "www.argosopentech.com"
+            "www.argosopentech.com",
+            "argos-net.com"
         };
 
         return trustedHosts.Any(host => uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase) ||
