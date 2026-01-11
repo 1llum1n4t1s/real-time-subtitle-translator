@@ -30,6 +30,7 @@ public class WhisperTranslationService : ITranslationService
     private bool _isModelLoaded = false;
     private WhisperProcessor? _processor;
     private WhisperFactory? _factory;
+    private MistralTranslationService? _mistralService;
 
     private Dictionary<string, string> _preTranslationDict = new();
     private Dictionary<string, string> _postTranslationDict = new();
@@ -72,8 +73,9 @@ public class WhisperTranslationService : ITranslationService
         try
         {
             // モデルファイルをダウンロード/確認
-            const string defaultModelFileName = "ggml-large-v3.bin";
-            const string downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin";
+            // medium: 高速（~3-5倍）、精度はlarge-v3より低い
+            const string defaultModelFileName = "ggml-medium.bin";
+            const string downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin";
 
             var modelFilePath = await _downloadService.EnsureModelAsync(
                 _settings.ModelPath,
@@ -89,6 +91,10 @@ public class WhisperTranslationService : ITranslationService
 
             // モデルをロード
             await Task.Run(() => LoadModelFromPath(modelFilePath));
+
+            // Mistral翻訳サービスを初期化
+            _mistralService = new MistralTranslationService();
+            await _mistralService.InitializeAsync();
         }
         catch (Exception ex)
         {
@@ -125,8 +131,8 @@ public class WhisperTranslationService : ITranslationService
 
         var sw = Stopwatch.StartNew();
 
+        // 完全一致キャッシュ（高速）
         var cacheKey = $"{sourceLanguage}:{targetLanguage}:{text}";
-
         if (TryGetFromCache(cacheKey, out var cachedTranslation) && cachedTranslation != null)
         {
             sw.Stop();
@@ -142,21 +148,46 @@ public class WhisperTranslationService : ITranslationService
             };
         }
 
+        // 部分一致キャッシュ（セグメント数が多い場合の最適化）
+        if (text.Length > 200)
+        {
+            var partialMatch = TryGetPartialCacheMatch(text, sourceLanguage, targetLanguage);
+            if (partialMatch != null)
+            {
+                sw.Stop();
+                LogDebug($"[TranslateAsync] 部分キャッシュヒット: {text.Substring(0, 50)}... -> キャッシュ使用");
+                return new TranslationResult
+                {
+                    OriginalText = text,
+                    TranslatedText = partialMatch,
+                    SourceLanguage = sourceLanguage,
+                    TargetLanguage = targetLanguage,
+                    FromCache = true,
+                    ProcessingTimeMs = sw.ElapsedMilliseconds
+                };
+            }
+        }
+
         await _translateLock.WaitAsync();
         try
         {
             var preprocessedText = ApplyPreTranslation(text);
             LogDebug($"[TranslateAsync] 翻訳開始: Text={preprocessedText}, Source={sourceLanguage}, Target={targetLanguage}");
 
-            // MyMemory Translation API を使用（無料、認証不要）
+            // Mistralローカル翻訳を使用
             string translatedText;
             if (sourceLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase))
             {
                 translatedText = preprocessedText;
             }
+            else if (_mistralService != null)
+            {
+                translatedText = await _mistralService.TranslateAsync(preprocessedText, sourceLanguage, targetLanguage);
+            }
             else
             {
-                translatedText = await TranslateWithMyMemoryAsync(preprocessedText, sourceLanguage, targetLanguage);
+                LogWarning($"[TranslateAsync] Mistralサービスが初期化されていません");
+                translatedText = preprocessedText;
             }
 
             translatedText = ApplyPostTranslation(translatedText);
@@ -194,19 +225,22 @@ public class WhisperTranslationService : ITranslationService
         }
 
         return await Task.Run(async () =>
-        {
-            try
             {
-                LogDebug($"[TranslateAudioAsync] 音声翻訳開始: Source={sourceLanguage}, Target={targetLanguage}, AudioLength={audioData.Length}");
+                try
+                {
+                    LogDebug($"[TranslateAudioAsync] 音声翻訳開始: Source={sourceLanguage}, Target={targetLanguage}, AudioLength={audioData.Length}");
+                    var sw = Stopwatch.StartNew();
 
-                // ステップ1: Whisper で音声を認識（常に英語）
-                var recognizedSegments = new List<string>();
-                await foreach (var segment in _processor.ProcessAsync(audioData))
+                    // ステップ1: Whisper で音声を認識（常に英語）
+                    var recognizedSegments = new List<string>();
+                    var swStep1 = Stopwatch.StartNew();
+                    await foreach (var segment in _processor.ProcessAsync(audioData))
                 {
                     recognizedSegments.Add(segment.Text.Trim());
                     LogDebug($"[TranslateAudioAsync] 認識セグメント: {segment.Text}");
                 }
 
+                swStep1.Stop();
                 var recognizedText = string.Join(" ", recognizedSegments);
                 if (string.IsNullOrWhiteSpace(recognizedText))
                 {
@@ -214,7 +248,7 @@ public class WhisperTranslationService : ITranslationService
                     return string.Empty;
                 }
 
-                LogDebug($"[TranslateAudioAsync] 認識完了: {recognizedText}");
+                LogDebug($"[TranslateAudioAsync] 認識完了: {recognizedText} (ASR処理時間: {swStep1.ElapsedMilliseconds}ms)");
 
                 // ステップ2: 認識したテキストを翻訳（英語→目標言語）
                 if (targetLanguage.Equals("en", StringComparison.OrdinalIgnoreCase))
@@ -224,10 +258,14 @@ public class WhisperTranslationService : ITranslationService
                     return recognizedText;
                 }
 
+                var swStep2 = Stopwatch.StartNew();
                 var translationResult = await TranslateAsync(recognizedText, "en", targetLanguage);
+                swStep2.Stop();
                 var translatedText = translationResult.TranslatedText;
 
-                LogDebug($"[TranslateAudioAsync] 翻訳完了: {translatedText}");
+                LogDebug($"[TranslateAudioAsync] 翻訳完了: {translatedText} (テキスト翻訳処理時間: {swStep2.ElapsedMilliseconds}ms)");
+                sw.Stop();
+                LogDebug($"[TranslateAudioAsync] 合計処理時間: {sw.ElapsedMilliseconds}ms (ASR: {swStep1.ElapsedMilliseconds}ms + 翻訳: {swStep2.ElapsedMilliseconds}ms)");
                 return translatedText;
             }
             catch (Exception ex)
@@ -261,6 +299,39 @@ public class WhisperTranslationService : ITranslationService
                 _cache.Remove(oldestKey);
             }
         }
+    }
+
+    /// <summary>
+    /// 部分キャッシュマッチを試行（セグメント単位での再利用）
+    /// </summary>
+    private string? TryGetPartialCacheMatch(string text, string sourceLanguage, string targetLanguage)
+    {
+        var sentences = text.Split(new[] { "。", ".", "!", "?" }, StringSplitOptions.RemoveEmptyEntries);
+        if (sentences.Length <= 1) return null;
+
+        var translatedSentences = new List<string>();
+        var allCached = true;
+
+        foreach (var sentence in sentences)
+        {
+            var trimmed = sentence.Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+
+            var sentenceCacheKey = $"{sourceLanguage}:{targetLanguage}:{trimmed}";
+            if (TryGetFromCache(sentenceCacheKey, out var cached) && cached != null)
+            {
+                translatedSentences.Add(cached);
+            }
+            else
+            {
+                allCached = false;
+                break;
+            }
+        }
+
+        return allCached && translatedSentences.Count > 0
+            ? string.Join("。", translatedSentences) + "。"
+            : null;
     }
 
     /// <summary>
@@ -312,19 +383,6 @@ public class WhisperTranslationService : ITranslationService
                 throw new FileNotFoundException($"Translation model not found: {modelPath}");
             }
 
-            // GPU を有効にするための環境変数設定（複数オプションをサポート）
-            // NVIDIA CUDA をサポート
-            Environment.SetEnvironmentVariable("GGML_USE_CUDA", "1");
-            LoggerService.LogDebug("GPU (CUDA) support enabled");
-
-            // AMD RADEON をサポート（Vulkan）
-            Environment.SetEnvironmentVariable("GGML_USE_VULKAN", "1");
-            LoggerService.LogDebug("GPU (Vulkan/RADEON) support enabled");
-
-            // AMD RADEON をサポート（HIP/ROCm）
-            Environment.SetEnvironmentVariable("GGML_USE_HIP", "1");
-            LoggerService.LogDebug("GPU (HIP/ROCm/RADEON) support enabled");
-
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
                 ModelLabel,
@@ -332,7 +390,9 @@ public class WhisperTranslationService : ITranslationService
                 "WhisperFactory を作成中..."));
 
             LoggerService.LogDebug($"Loading translation model from: {modelPath}");
-            _factory = WhisperFactory.FromPath(modelPath);
+
+            // GPU ランタイムを優先順に試行（CUDA → Vulkan → CPU）
+            _factory = TryLoadWithGpuRuntime(modelPath);
 
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
@@ -340,12 +400,16 @@ public class WhisperTranslationService : ITranslationService
                 ModelStatusType.Info,
                 "WhisperProcessor を作成中..."));
 
+            // GPU使用時のスレッド数最適化
+            // GPU使用時は少ないスレッド数でCPU-GPU協働実行を効率化
+            // CPU使用時は多いスレッド数で並列化
+            var processorCount = Math.Max(4, Environment.ProcessorCount - 2);
             var builder = _factory.CreateBuilder()
-                .WithThreads(Environment.ProcessorCount);
+                .WithThreads(processorCount);
 
             _processor = builder.Build();
             
-            LoggerService.LogDebug("Whisper Processor created with GPU support (NVIDIA CUDA + AMD RADEON Vulkan/HIP)");
+            LoggerService.LogDebug($"Whisper Processor created with {processorCount} threads");
 
             _isModelLoaded = true;
             LoggerService.LogInfo("Whisper翻訳モデルの読み込みが完了しました");
@@ -369,55 +433,44 @@ public class WhisperTranslationService : ITranslationService
         }
     }
 
-    private async Task<string> TranslateWithMyMemoryAsync(string text, string sourceLanguage, string targetLanguage)
+    /// <summary>
+    /// GPU ランタイムを優先順に試行してモデルをロード（CUDA → Vulkan → CPU）
+    /// </summary>
+    private WhisperFactory TryLoadWithGpuRuntime(string modelPath)
     {
+        // GPU ランタイムの優先順位を設定（CUDA → Vulkan → CPU）
         try
         {
-            // MyMemory Translation API のエンドポイント
-            const string baseUrl = "https://api.mymemory.translated.net/get";
-            
-            // 言語コードを標準化（en, ja など）
-            var sourceLang = sourceLanguage.Split('-')[0].ToLower();
-            var targetLang = targetLanguage.Split('-')[0].ToLower();
-            
-            var url = $"{baseUrl}?q={Uri.EscapeDataString(text)}&langpair={sourceLang}|{targetLang}";
-            
-            LogDebug($"[TranslateWithMyMemoryAsync] MyMemory API呼び出し: {sourceLang}→{targetLang}");
-            
-            var response = await _httpClient.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
-            {
-                LogError($"[TranslateWithMyMemoryAsync] MyMemory API エラー: {response.StatusCode}");
-                return text; // 失敗時は元のテキストを返す
-            }
-
-            var jsonContent = await response.Content.ReadAsStringAsync();
-            LogDebug($"[TranslateWithMyMemoryAsync] API応答: {jsonContent}");
-            
-            // JSON をパース（簡易的な方法）
-            if (jsonContent.Contains("\"translatedText\":"))
-            {
-                var startIdx = jsonContent.IndexOf("\"translatedText\":\"") + "\"translatedText\":\"".Length;
-                var endIdx = jsonContent.IndexOf("\"", startIdx);
-                if (startIdx > 0 && endIdx > startIdx)
-                {
-                    var translated = jsonContent.Substring(startIdx, endIdx - startIdx);
-                    // JSON エスケープを解除
-                    translated = translated.Replace("\\\"", "\"").Replace("\\\\", "\\").Replace("\\/", "/");
-                    LogDebug($"[TranslateWithMyMemoryAsync] 翻訳結果: {translated}");
-                    return translated;
-                }
-            }
-
-            LogWarning($"[TranslateWithMyMemoryAsync] 翻訳結果をパースできません");
-            return text;
+            LoggerService.LogDebug("Setting GPU runtime priority: CUDA → Vulkan → CPU");
+            Whisper.net.LibraryLoader.RuntimeOptions.RuntimeLibraryOrder =
+            [
+                Whisper.net.LibraryLoader.RuntimeLibrary.Cuda,
+                Whisper.net.LibraryLoader.RuntimeLibrary.Vulkan,
+                Whisper.net.LibraryLoader.RuntimeLibrary.Cpu
+            ];
         }
         catch (Exception ex)
         {
-            LogError($"[TranslateWithMyMemoryAsync] エラー: {ex.Message}");
-            return text; // 例外時は元のテキストを返す
+            LoggerService.LogDebug($"Failed to set runtime order: {ex.Message}");
         }
+
+        // ファクトリを作成（自動的に優先順位に従ってランタイムを選択）
+        var factory = WhisperFactory.FromPath(modelPath);
+        
+        // 使用されているランタイムをログに出力
+        try
+        {
+            var loadedLibrary = Whisper.net.LibraryLoader.RuntimeOptions.LoadedLibrary;
+            LoggerService.LogInfo($"✅ Whisper runtime loaded: {loadedLibrary}");
+        }
+        catch
+        {
+            LoggerService.LogDebug("Could not determine loaded runtime library");
+        }
+
+        return factory;
     }
+
 
     public void SetPreTranslationDictionary(Dictionary<string, string> dictionary)
     {
@@ -442,6 +495,7 @@ public class WhisperTranslationService : ITranslationService
     {
         _processor?.Dispose();
         _factory?.Dispose();
+        _mistralService?.Dispose();
         _translateLock.Dispose();
     }
 }

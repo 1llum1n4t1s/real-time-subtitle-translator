@@ -74,6 +74,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _loadingMessage = "初期化中...";
 
+    [ObservableProperty]
+    private double _loadingProgress = 0.0;
+
+    [ObservableProperty]
+    private string _loadingProgressText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isLoadingProgressVisible = false;
+
     /// <summary>
     /// 開始ボタンが有効かどうか
     /// </summary>
@@ -614,9 +623,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnModelDownloadProgress(object? sender, ModelDownloadProgressEventArgs e)
     {
-        var progressText = e.ProgressPercentage.HasValue
-            ? $"{e.ProgressPercentage.Value:F1}%"
-            : "進捗不明";
+        var progressPercent = e.ProgressPercentage ?? 0;
+        LoadingProgress = Math.Min(100, progressPercent);
+        IsLoadingProgressVisible = true;
+
+        var progressText = $"{progressPercent:F1}%";
+        var downloadedMB = e.BytesReceived / (1024.0 * 1024.0);
+        var totalMB = e.TotalBytes.HasValue ? (e.TotalBytes.Value / (1024.0 * 1024.0)) : 0;
+
+        if (e.TotalBytes.HasValue && totalMB > 0)
+        {
+            LoadingProgressText = $"{downloadedMB:F1}MB / {totalMB:F1}MB ({progressText})";
+        }
+        else
+        {
+            LoadingProgressText = $"{downloadedMB:F1}MB ダウンロード中...";
+        }
+
         StatusText = $"{e.ServiceName} {e.ModelName} ダウンロード中... {progressText}";
         StatusColor = Brushes.Orange;
         // suppressDuplicate: true で連続するダウンロード進捗メッセージを抑制

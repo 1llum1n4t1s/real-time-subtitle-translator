@@ -146,6 +146,13 @@ public class AppSettings
             LoggerService.LogWarning($"Invalid GPU DeviceId {settings.ASR.GPU.DeviceId}, using default 0");
             settings.ASR.GPU.DeviceId = 0;
         }
+
+        // 縁取り太さの検証
+        if (settings.Overlay.StrokeThickness < 0)
+        {
+            LoggerService.LogWarning($"Invalid StrokeThickness {settings.Overlay.StrokeThickness}, using default 4.0");
+            settings.Overlay.StrokeThickness = 4.0;
+        }
     }
 
     /// <summary>
@@ -283,17 +290,17 @@ public class OverlaySettings
     /// <summary>
     /// フォントファミリー
     /// </summary>
-    public string FontFamily { get; set; } = "Yu Gothic UI";
+    public string FontFamily { get; set; } = "BIZ UDPGothic";
 
     /// <summary>
     /// フォントサイズ
     /// </summary>
-    public double FontSize { get; set; } = 24;
+    public double FontSize { get; set; } = 32;
 
     /// <summary>
     /// 仮字幕の文字色（ARGB）
     /// </summary>
-    public string PartialTextColor { get; set; } = "#80FFFFFF";
+    public string PartialTextColor { get; set; } = "#FFFFFFFF";
 
     /// <summary>
     /// 確定字幕の文字色（ARGB）
@@ -303,7 +310,17 @@ public class OverlaySettings
     /// <summary>
     /// 背景色（ARGB）
     /// </summary>
-    public string BackgroundColor { get; set; } = "#80000000";
+    public string BackgroundColor { get; set; } = "#00000000";
+
+    /// <summary>
+    /// 縁取り色（ARGB）
+    /// </summary>
+    public string StrokeColor { get; set; } = "#FF000000";
+
+    /// <summary>
+    /// 縁取りの太さ
+    /// </summary>
+    public double StrokeThickness { get; set; } = 4.0;
 
     /// <summary>
     /// 字幕表示時間（秒）

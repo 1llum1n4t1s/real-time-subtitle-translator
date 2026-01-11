@@ -24,7 +24,7 @@ public partial class OverlayViewModel : ObservableObject, IDisposable
     private ObservableCollection<SubtitleDisplayItem> _subtitles = new();
 
     [ObservableProperty]
-    private string _fontFamily = "Yu Gothic UI";
+    private string _fontFamily = "BIZ UDPGothic";
 
     [ObservableProperty]
     private double _fontSize = 24;
@@ -197,6 +197,12 @@ public partial class SubtitleDisplayItem : ObservableObject
     private Brush _textBrush = Brushes.White;
 
     [ObservableProperty]
+    private Brush _strokeBrush = Brushes.Black;
+
+    [ObservableProperty]
+    private double _strokeThickness = 0.0;
+
+    [ObservableProperty]
     private double _opacity = 1.0;
 
     private DateTime _displayEndTime;
@@ -213,6 +219,8 @@ public partial class SubtitleDisplayItem : ObservableObject
     {
         DisplayText = item.DisplayText;
         TextBrush = BrushHelper.ParseBrush(item.IsFinal ? settings.FinalTextColor : settings.PartialTextColor, Colors.White);
+        StrokeBrush = BrushHelper.ParseBrush(settings.StrokeColor, Colors.Black);
+        StrokeThickness = settings.StrokeThickness;
         _displayEndTime = DateTime.Now.AddSeconds(settings.DisplayDuration);
         Opacity = 1.0;
     }
