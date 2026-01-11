@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -27,6 +28,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private const int MaxTranslationParallelism = 2; // 翻訳の最大並列処理数
     private const int MaxLogLines = 1000; // ログの最大行数
     private const int ChannelCapacity = 100; // チャネルバッファサイズ
+
+    // プリコンパイルされた正規表現（パフォーマンス最適化）
+    private static readonly Regex NumericPatternRegex = new(@"[\d.]+%?", RegexOptions.Compiled);
 
     private readonly IAudioCaptureService _audioCaptureService;
     private readonly IVADService _vadService;
@@ -617,8 +621,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private static string ExtractBaseMessage(string message)
     {
-        // 数値とパーセント記号を除去してベース部分を比較
-        return System.Text.RegularExpressions.Regex.Replace(message, @"[\d.]+%?", "").Trim();
+        // プリコンパイルされた正規表現を使用（パフォーマンス最適化）
+        return NumericPatternRegex.Replace(message, "").Trim();
     }
 
     private void OnModelDownloadProgress(object? sender, ModelDownloadProgressEventArgs e)
@@ -675,19 +679,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private static string FormatExceptionMessage(Exception ex)
     {
-        var messages = new List<string>();
+        // HashSetで重複を排除しながら収集（パフォーマンス最適化）
+        var uniqueMessages = new HashSet<string>(StringComparer.Ordinal);
+        var orderedMessages = new List<string>();
         Exception? current = ex;
+
         while (current != null)
         {
-            if (!string.IsNullOrWhiteSpace(current.Message))
+            var msg = current.Message?.Trim();
+            if (!string.IsNullOrWhiteSpace(msg) && uniqueMessages.Add(msg))
             {
-                messages.Add(current.Message.Trim());
+                orderedMessages.Add(msg);
             }
             current = current.InnerException;
         }
 
-        var normalized = messages.Distinct().ToList();
-        return normalized.Count > 0 ? string.Join(" / ", normalized) : ex.GetType().Name;
+        return orderedMessages.Count > 0 ? string.Join(" / ", orderedMessages) : ex.GetType().Name;
     }
 
     partial void OnSelectedProcessChanged(ProcessInfo? value)
@@ -877,7 +884,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 /// <summary>
 /// プロセス情報
 /// </summary>
-public class ProcessInfo
+public sealed class ProcessInfo
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;

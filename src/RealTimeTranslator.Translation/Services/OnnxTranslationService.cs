@@ -13,7 +13,7 @@ namespace RealTimeTranslator.Translation.Services;
 /// ONNX RuntimeベースのAI翻訳サービス
 /// Helsinki-NLP/OPUS-MTモデルをONNX形式で使用（GPU対応）
 /// </summary>
-public class OnnxTranslationService : ITranslationService
+public sealed class OnnxTranslationService : ITranslationService
 {
     private const string ServiceName = "翻訳";
     private const string ModelLabel = "NLLB翻訳モデル";
@@ -27,9 +27,49 @@ public class OnnxTranslationService : ITranslationService
     private const string LanguageTagJapanese = "<ja_XX>";
     private const string LanguageTagEnglish = "<en_XX>";
 
+    // 静的辞書キャッシュ（パフォーマンス最適化 - 毎回生成を回避）
+    private static readonly Dictionary<string, string> EnglishToJapaneseDict = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "hello", "こんにちは" },
+        { "hi", "やあ" },
+        { "good morning", "おはようございます" },
+        { "good evening", "こんばんは" },
+        { "thank you", "ありがとう" },
+        { "thanks", "ありがとう" },
+        { "please", "お願いします" },
+        { "yes", "はい" },
+        { "no", "いいえ" },
+        { "sorry", "ごめんなさい" },
+        { "excuse me", "失礼します" },
+        { "good bye", "さようなら" },
+        { "goodbye", "さようなら" },
+        { "where", "どこ" },
+        { "what", "何" },
+        { "who", "誰" },
+        { "when", "いつ" },
+        { "why", "なぜ" },
+        { "how", "どう" },
+        { "help", "助けて" },
+        { "water", "水" },
+        { "food", "食べ物" },
+        { "love", "愛" },
+        { "good", "良い" },
+        { "bad", "悪い" },
+        { "big", "大きい" },
+        { "small", "小さい" },
+        { "hot", "熱い" },
+        { "cold", "寒い" },
+        { "fast", "速い" },
+        { "slow", "遅い" }
+    };
+
+    private static readonly char[] PunctuationChars = ['.', ',', '!', '?', ';', ':'];
+
     private readonly TranslationSettings _settings;
     private readonly ModelDownloadService _downloadService;
-    private readonly Dictionary<string, string> _cache = new();
+
+    // LRUキャッシュ（最適化版）: LinkedListNodeを直接保持してO(1)アクセスを実現
+    private readonly Dictionary<string, (string Value, LinkedListNode<string> Node)> _cache = new();
     private readonly LinkedList<string> _cacheOrder = new();
     private readonly object _cacheLock = new();
 
@@ -242,21 +282,24 @@ public class OnnxTranslationService : ITranslationService
     }
 
     /// <summary>
-    /// キャッシュに追加（LRU キャッシュ戦略）
+    /// キャッシュに追加（LRU キャッシュ戦略 - O(1)最適化版）
     /// </summary>
     private void AddToCache(string key, string value)
     {
         lock (_cacheLock)
         {
-            if (_cache.ContainsKey(key))
+            // 既存エントリがあれば削除（O(1)でノードにアクセス）
+            if (_cache.TryGetValue(key, out var existing))
             {
-                _cacheOrder.Remove(_cacheOrder.Find(key)!);
+                _cacheOrder.Remove(existing.Node);
             }
 
-            _cache[key] = value;
-            _cacheOrder.AddLast(key);
+            // 新しいノードを末尾に追加
+            var node = _cacheOrder.AddLast(key);
+            _cache[key] = (value, node);
 
-            if (_cacheOrder.Count > MaxCacheSize)
+            // キャッシュサイズ制限を超えた場合、最古のエントリを削除
+            while (_cacheOrder.Count > MaxCacheSize)
             {
                 var oldestKey = _cacheOrder.First!.Value;
                 _cacheOrder.RemoveFirst();
@@ -266,17 +309,20 @@ public class OnnxTranslationService : ITranslationService
     }
 
     /// <summary>
-    /// キャッシュから取得
+    /// キャッシュから取得（O(1)最適化版）
     /// </summary>
     private bool TryGetFromCache(string key, out string? value)
     {
         lock (_cacheLock)
         {
-            if (_cache.TryGetValue(key, out var cachedValue))
+            if (_cache.TryGetValue(key, out var entry))
             {
-                _cacheOrder.Remove(_cacheOrder.Find(key)!);
-                _cacheOrder.AddLast(key);
-                value = cachedValue;
+                // ノードを末尾に移動（O(1)でノードにアクセス）
+                _cacheOrder.Remove(entry.Node);
+                var newNode = _cacheOrder.AddLast(key);
+                _cache[key] = (entry.Value, newNode);
+
+                value = entry.Value;
                 return true;
             }
 
@@ -305,8 +351,9 @@ public class OnnxTranslationService : ITranslationService
 
     /// <summary>
     /// シンプルな翻訳ルールを適用（デコーダーがないため簡易実装）
+    /// 静的辞書を使用してパフォーマンスを最適化
     /// </summary>
-    private string ApplySimpleTranslationRules(string text, string sourceLanguage, string targetLanguage)
+    private static string ApplySimpleTranslationRules(string text, string sourceLanguage, string targetLanguage)
     {
         if (sourceLanguage == targetLanguage)
         {
@@ -315,50 +362,17 @@ public class OnnxTranslationService : ITranslationService
 
         if (sourceLanguage == "en" && targetLanguage == "ja")
         {
-            var simpleDictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "hello", "こんにちは" },
-                { "hi", "やあ" },
-                { "good morning", "おはようございます" },
-                { "good evening", "こんばんは" },
-                { "thank you", "ありがとう" },
-                { "thanks", "ありがとう" },
-                { "please", "お願いします" },
-                { "yes", "はい" },
-                { "no", "いいえ" },
-                { "sorry", "ごめんなさい" },
-                { "excuse me", "失礼します" },
-                { "good bye", "さようなら" },
-                { "goodbye", "さようなら" },
-                { "where", "どこ" },
-                { "what", "何" },
-                { "who", "誰" },
-                { "when", "いつ" },
-                { "why", "なぜ" },
-                { "how", "どう" },
-                { "help", "助けて" },
-                { "water", "水" },
-                { "food", "食べ物" },
-                { "love", "愛" },
-                { "good", "良い" },
-                { "bad", "悪い" },
-                { "big", "大きい" },
-                { "small", "小さい" },
-                { "hot", "熱い" },
-                { "cold", "寒い" },
-                { "fast", "速い" },
-                { "slow", "遅い" }
-            };
-
             var words = text.Split(' ');
-            var translatedWords = new List<string>();
+            var translatedWords = new List<string>(words.Length); // 容量を事前確保
 
             foreach (var word in words)
             {
-                var cleanWord = word.TrimEnd(new[] { '.', ',', '!', '?', ';', ':' });
-                var suffix = word.Substring(Math.Min(cleanWord.Length, word.Length));
+                var cleanWord = word.TrimEnd(PunctuationChars);
+                var suffix = cleanWord.Length < word.Length
+                    ? word.Substring(cleanWord.Length)
+                    : string.Empty;
 
-                if (simpleDictionary.TryGetValue(cleanWord, out var translatedWord))
+                if (EnglishToJapaneseDict.TryGetValue(cleanWord, out var translatedWord))
                 {
                     translatedWords.Add(translatedWord + suffix);
                 }

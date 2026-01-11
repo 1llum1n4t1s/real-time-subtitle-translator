@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Security;
 using NAudio.CoreAudioApi;
@@ -274,6 +275,11 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
 
     private void CaptureThread()
     {
+        // ArrayPoolでバッファを再利用（パフォーマンス最適化）
+        var bytePool = ArrayPool<byte>.Shared;
+        byte[]? rentedBuffer = null;
+        var lastRentedSize = 0;
+
         try
         {
             var frameSize = WaveFormat.BlockAlign;
@@ -284,18 +290,32 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
                 {
                     ThrowOnError(_captureClient.GetBuffer(out var dataPointer, out var numFrames, out var flags, out _, out _));
                     var bytesToRead = (int)(numFrames * (uint)frameSize);
-                    var buffer = new byte[bytesToRead];
+
+                    // 必要なサイズが前回より大きい場合のみ再レンタル
+                    if (rentedBuffer == null || bytesToRead > lastRentedSize)
+                    {
+                        if (rentedBuffer != null)
+                        {
+                            bytePool.Return(rentedBuffer);
+                        }
+                        rentedBuffer = bytePool.Rent(bytesToRead);
+                        lastRentedSize = rentedBuffer.Length;
+                    }
 
                     if ((flags & AudioClientBufferFlags.Silent) != 0)
                     {
-                        Array.Clear(buffer, 0, buffer.Length);
+                        Array.Clear(rentedBuffer, 0, bytesToRead);
                     }
                     else
                     {
-                        Marshal.Copy(dataPointer, buffer, 0, bytesToRead);
+                        Marshal.Copy(dataPointer, rentedBuffer, 0, bytesToRead);
                     }
 
-                    DataAvailable?.Invoke(this, new WaveInEventArgs(buffer, bytesToRead));
+                    // イベントハンドラがバッファを保持する可能性があるため、コピーを渡す
+                    var eventBuffer = new byte[bytesToRead];
+                    Buffer.BlockCopy(rentedBuffer, 0, eventBuffer, 0, bytesToRead);
+                    DataAvailable?.Invoke(this, new WaveInEventArgs(eventBuffer, bytesToRead));
+
                     ThrowOnError(_captureClient.ReleaseBuffer(numFrames));
                     ThrowOnError(_captureClient.GetNextPacketSize(out packetFrames));
                 }
@@ -306,6 +326,14 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
         catch (Exception ex)
         {
             RecordingStopped?.Invoke(this, new StoppedEventArgs(ex));
+        }
+        finally
+        {
+            // ArrayPoolにバッファを返却
+            if (rentedBuffer != null)
+            {
+                bytePool.Return(rentedBuffer);
+            }
         }
     }
 

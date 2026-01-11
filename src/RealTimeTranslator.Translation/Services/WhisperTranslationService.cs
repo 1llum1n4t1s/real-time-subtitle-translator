@@ -23,7 +23,9 @@ public class WhisperTranslationService : ITranslationService
     private readonly TranslationSettings _settings;
     private readonly ModelDownloadService _downloadService;
     private readonly HttpClient _httpClient;
-    private readonly Dictionary<string, string> _cache = new();
+
+    // LRUキャッシュ（最適化版）: LinkedListNodeを直接保持してO(1)アクセスを実現
+    private readonly Dictionary<string, (string Value, LinkedListNode<string> Node)> _cache = new();
     private readonly LinkedList<string> _cacheOrder = new();
     private readonly object _cacheLock = new();
 
@@ -278,21 +280,24 @@ public class WhisperTranslationService : ITranslationService
     }
 
     /// <summary>
-    /// キャッシュに追加（LRU キャッシュ戦略）
+    /// キャッシュに追加（LRU キャッシュ戦略 - O(1)最適化版）
     /// </summary>
     private void AddToCache(string key, string value)
     {
         lock (_cacheLock)
         {
-            if (_cache.ContainsKey(key))
+            // 既存エントリがあれば削除（O(1)でノードにアクセス）
+            if (_cache.TryGetValue(key, out var existing))
             {
-                _cacheOrder.Remove(_cacheOrder.Find(key)!);
+                _cacheOrder.Remove(existing.Node);
             }
 
-            _cache[key] = value;
-            _cacheOrder.AddLast(key);
+            // 新しいノードを末尾に追加
+            var node = _cacheOrder.AddLast(key);
+            _cache[key] = (value, node);
 
-            if (_cacheOrder.Count > MaxCacheSize)
+            // キャッシュサイズ制限を超えた場合、最古のエントリを削除
+            while (_cacheOrder.Count > MaxCacheSize)
             {
                 var oldestKey = _cacheOrder.First!.Value;
                 _cacheOrder.RemoveFirst();
@@ -335,17 +340,20 @@ public class WhisperTranslationService : ITranslationService
     }
 
     /// <summary>
-    /// キャッシュから取得
+    /// キャッシュから取得（O(1)最適化版）
     /// </summary>
     private bool TryGetFromCache(string key, out string? value)
     {
         lock (_cacheLock)
         {
-            if (_cache.TryGetValue(key, out var cachedValue))
+            if (_cache.TryGetValue(key, out var entry))
             {
-                _cacheOrder.Remove(_cacheOrder.Find(key)!);
-                _cacheOrder.AddLast(key);
-                value = cachedValue;
+                // ノードを末尾に移動（O(1)でノードにアクセス）
+                _cacheOrder.Remove(entry.Node);
+                var newNode = _cacheOrder.AddLast(key);
+                _cache[key] = (entry.Value, newNode);
+
+                value = entry.Value;
                 return true;
             }
 

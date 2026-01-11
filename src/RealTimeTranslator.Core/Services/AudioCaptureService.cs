@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using NAudio.Wave;
@@ -11,7 +12,7 @@ namespace RealTimeTranslator.Core.Services;
 /// 音声キャプチャサービス
 /// プロセス単位のループバックキャプチャを実装
 /// </summary>
-public class AudioCaptureService : IAudioCaptureService
+public sealed class AudioCaptureService : IAudioCaptureService
 {
     private const int AudioChunkDurationMs = 100; // 音声チャンクの長さ（ミリ秒）
     private const int MonoChannelCount = 1; // モノラルチャンネル数
@@ -26,10 +27,18 @@ public class AudioCaptureService : IAudioCaptureService
     private const int InvalidArgumentHResult = unchecked((int)0x80070057); // E_INVALIDARG
     private const int MaxBufferSize = 48000; // 最大バッファサイズ（1秒分の48kHzオーディオ）
 
+    // ArrayPoolでメモリ再利用（パフォーマンス最適化）
+    private static readonly ArrayPool<float> FloatPool = ArrayPool<float>.Shared;
+
     private IWaveIn? _capture;
     private WaveFormat? _targetFormat;
     private readonly AudioCaptureSettings _settings;
-    private readonly List<float> _audioBuffer = [];
+
+    // 循環バッファ（リングバッファ）でメモリ効率を向上
+    private float[] _circularBuffer;
+    private int _bufferWritePos;
+    private int _bufferReadPos;
+    private int _bufferCount;
     private readonly object _bufferLock = new();
     private bool _isCapturing;
     private bool _isDisposed;
@@ -54,6 +63,8 @@ public class AudioCaptureService : IAudioCaptureService
     {
         _settings = settings ?? new AudioCaptureSettings();
         _targetFormat = WaveFormat.CreateIeeeFloatWaveFormat(_settings.SampleRate, MonoChannelCount);
+        // 循環バッファを初期化（最大バッファサイズ + マージン）
+        _circularBuffer = new float[MaxBufferSize + _settings.SampleRate]; // 1秒分のマージン
     }
 
     /// <summary>
@@ -75,7 +86,24 @@ public class AudioCaptureService : IAudioCaptureService
             _settings.SilenceThreshold = settings.SilenceThreshold;
 
             _targetFormat = WaveFormat.CreateIeeeFloatWaveFormat(_settings.SampleRate, MonoChannelCount);
-            _audioBuffer.Clear();
+            // 循環バッファをリセット
+            ResetCircularBuffer();
+        }
+    }
+
+    /// <summary>
+    /// 循環バッファをリセット
+    /// </summary>
+    private void ResetCircularBuffer()
+    {
+        _bufferWritePos = 0;
+        _bufferReadPos = 0;
+        _bufferCount = 0;
+        // バッファサイズが変わった場合は再割り当て
+        var requiredSize = MaxBufferSize + _settings.SampleRate;
+        if (_circularBuffer.Length < requiredSize)
+        {
+            _circularBuffer = new float[requiredSize];
         }
     }
 
@@ -91,7 +119,10 @@ public class AudioCaptureService : IAudioCaptureService
             StopCapture();
 
         _targetProcessId = processId;
-        _audioBuffer.Clear();
+        lock (_bufferLock)
+        {
+            ResetCircularBuffer();
+        }
 
         // Windows Core Audio API(AudioClientActivationParams/IAudioClient3)で対象プロセスのみを初期化する
         _capture = new ProcessLoopbackCapture(_targetProcessId);
@@ -116,7 +147,10 @@ public class AudioCaptureService : IAudioCaptureService
             StopCapture();
 
         _targetProcessId = processId;
-        _audioBuffer.Clear();
+        lock (_bufferLock)
+        {
+            ResetCircularBuffer();
+        }
 
         // リモートオーディオデバイスの判定
         var isRemoteAudio = IsRemoteAudioDevice();
@@ -450,29 +484,87 @@ public class AudioCaptureService : IAudioCaptureService
             samples = ConvertToMono(samples, sourceFormat.Channels);
         }
 
-        // バッファに追加
+        // 循環バッファに追加
         lock (_bufferLock)
         {
-            _audioBuffer.AddRange(samples);
-
-            // バッファサイズが上限を超えた場合は古いデータを削除
-            if (_audioBuffer.Count > MaxBufferSize)
-            {
-                var excessSamples = _audioBuffer.Count - MaxBufferSize;
-                _audioBuffer.RemoveRange(0, excessSamples);
-                LoggerService.LogDebug($"Audio buffer overflow prevented: removed {excessSamples} samples");
-            }
+            WriteToCircularBuffer(samples);
 
             // 一定量のデータが溜まったらイベントを発火
             var samplesPerChunk = targetSampleRate * AudioChunkDurationMs / 1000;
-            while (_audioBuffer.Count >= samplesPerChunk)
+            while (_bufferCount >= samplesPerChunk)
             {
-                var chunk = _audioBuffer.Take(samplesPerChunk).ToArray();
-                _audioBuffer.RemoveRange(0, samplesPerChunk);
-
-                AudioDataAvailable?.Invoke(this, new AudioDataEventArgs(chunk, DateTime.Now));
+                // ArrayPoolから配列をレンタル（メモリ再利用）
+                var chunk = FloatPool.Rent(samplesPerChunk);
+                try
+                {
+                    ReadFromCircularBuffer(chunk, samplesPerChunk);
+                    // イベント用に正確なサイズの配列を作成（イベントハンドラが配列を保持する可能性があるため）
+                    var eventData = new float[samplesPerChunk];
+                    Array.Copy(chunk, eventData, samplesPerChunk);
+                    AudioDataAvailable?.Invoke(this, new AudioDataEventArgs(eventData, DateTime.Now));
+                }
+                finally
+                {
+                    FloatPool.Return(chunk);
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// 循環バッファにデータを書き込む
+    /// </summary>
+    private void WriteToCircularBuffer(float[] samples)
+    {
+        var samplesToWrite = samples.Length;
+
+        // バッファがオーバーフローする場合は古いデータを上書き
+        if (_bufferCount + samplesToWrite > _circularBuffer.Length)
+        {
+            var excessSamples = (_bufferCount + samplesToWrite) - _circularBuffer.Length;
+            _bufferReadPos = (_bufferReadPos + excessSamples) % _circularBuffer.Length;
+            _bufferCount -= excessSamples;
+            LoggerService.LogDebug($"Audio buffer overflow prevented: discarded {excessSamples} samples");
+        }
+
+        // データを循環バッファに書き込む
+        var spaceToEnd = _circularBuffer.Length - _bufferWritePos;
+        if (samplesToWrite <= spaceToEnd)
+        {
+            // 一度に書き込める
+            Array.Copy(samples, 0, _circularBuffer, _bufferWritePos, samplesToWrite);
+        }
+        else
+        {
+            // 分割して書き込み（ラップアラウンド）
+            Array.Copy(samples, 0, _circularBuffer, _bufferWritePos, spaceToEnd);
+            Array.Copy(samples, spaceToEnd, _circularBuffer, 0, samplesToWrite - spaceToEnd);
+        }
+
+        _bufferWritePos = (_bufferWritePos + samplesToWrite) % _circularBuffer.Length;
+        _bufferCount += samplesToWrite;
+    }
+
+    /// <summary>
+    /// 循環バッファからデータを読み取る
+    /// </summary>
+    private void ReadFromCircularBuffer(float[] destination, int count)
+    {
+        var spaceToEnd = _circularBuffer.Length - _bufferReadPos;
+        if (count <= spaceToEnd)
+        {
+            // 一度に読み取れる
+            Array.Copy(_circularBuffer, _bufferReadPos, destination, 0, count);
+        }
+        else
+        {
+            // 分割して読み取り（ラップアラウンド）
+            Array.Copy(_circularBuffer, _bufferReadPos, destination, 0, spaceToEnd);
+            Array.Copy(_circularBuffer, 0, destination, spaceToEnd, count - spaceToEnd);
+        }
+
+        _bufferReadPos = (_bufferReadPos + count) % _circularBuffer.Length;
+        _bufferCount -= count;
     }
 
     private void OnRecordingStopped(object? sender, StoppedEventArgs e)
