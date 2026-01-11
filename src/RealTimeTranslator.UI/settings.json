@@ -6,7 +6,7 @@
     "UseBeamSearch": true,
     "BeamSize": 5,
     "GPU": {
-      "Enabled": true,
+      "Enabled": false,
       "DeviceId": 0,
       "Type": "Auto"
     }
