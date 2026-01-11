@@ -312,9 +312,18 @@ public class WhisperTranslationService : ITranslationService
                 throw new FileNotFoundException($"Translation model not found: {modelPath}");
             }
 
-            // GPU を有効にするための環境変数設定（CUDA）
+            // GPU を有効にするための環境変数設定（複数オプションをサポート）
+            // NVIDIA CUDA をサポート
             Environment.SetEnvironmentVariable("GGML_USE_CUDA", "1");
             LoggerService.LogDebug("GPU (CUDA) support enabled");
+
+            // AMD RADEON をサポート（Vulkan）
+            Environment.SetEnvironmentVariable("GGML_USE_VULKAN", "1");
+            LoggerService.LogDebug("GPU (Vulkan/RADEON) support enabled");
+
+            // AMD RADEON をサポート（HIP/ROCm）
+            Environment.SetEnvironmentVariable("GGML_USE_HIP", "1");
+            LoggerService.LogDebug("GPU (HIP/ROCm/RADEON) support enabled");
 
             OnModelStatusChanged(new ModelStatusChangedEventArgs(
                 ServiceName,
@@ -336,7 +345,7 @@ public class WhisperTranslationService : ITranslationService
 
             _processor = builder.Build();
             
-            LoggerService.LogDebug("Whisper Processor created with GPU support (CUDA)");
+            LoggerService.LogDebug("Whisper Processor created with GPU support (NVIDIA CUDA + AMD RADEON Vulkan/HIP)");
 
             _isModelLoaded = true;
             LoggerService.LogInfo("Whisper翻訳モデルの読み込みが完了しました");
