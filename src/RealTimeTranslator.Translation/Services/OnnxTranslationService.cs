@@ -361,8 +361,16 @@ public class OnnxTranslationService : ITranslationService
 
                 // トークンをテキストにデコード
                 var translatedText = _tokenizer.Decode(translatedTokenIds.ToArray());
-                LogDebug($"[PerformTranslationAsync] 翻訳完了: Result={translatedText}");
-                return string.IsNullOrWhiteSpace(translatedText) ? $"[{targetLanguage}] {text}" : translatedText;
+                LogDebug($"[PerformTranslationAsync] 翻訳完了: Result={translatedText}, TokenIds count={translatedTokenIds.Count}");
+                
+                // 翻訳が空の場合は元のテキストを返す（簡易実装のため）
+                if (string.IsNullOrWhiteSpace(translatedText))
+                {
+                    LogDebug($"[PerformTranslationAsync] 翻訳結果が空なため、元のテキストを返却");
+                    return text;
+                }
+                
+                return translatedText;
             }
             catch (Exception ex)
             {
@@ -554,11 +562,24 @@ public class OnnxTranslationService : ITranslationService
                 if (id >= 0 && id < _inverseVocab.Count)
                 {
                     var token = _inverseVocab[(int)id];
-                    if (!string.IsNullOrEmpty(token) && token != "<pad>" && token != "<unk>")
+                    // <pad>と<unk>を除外し、特殊トークンは無視
+                    if (!string.IsNullOrEmpty(token) && 
+                        token != "<pad>" && 
+                        token != "<unk>" && 
+                        token != "<s>" && 
+                        token != "</s>" && 
+                        token != "<mask>")
                     {
                         tokens.Add(token);
                     }
                 }
+            }
+
+            // 結果が空の場合のフォールバック
+            if (tokens.Count == 0)
+            {
+                // すべてのトークンを無視していないか確認（デバッグ用）
+                LoggerService.LogDebug($"[SimpleTokenizer.Decode] All tokens were filtered. Total tokens: {tokenIds.Length}");
             }
 
             return string.Join(" ", tokens);
