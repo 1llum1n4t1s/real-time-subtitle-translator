@@ -98,12 +98,22 @@ public class WhisperASRService : IASRService
                     var fileInfo = new FileInfo(fastModelPath);
                     Debug.WriteLine($"Loading fast model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
 
+                    Debug.WriteLine($"Creating WhisperFactory from path: {fastModelPath}");
                     _fastFactory = WhisperFactory.FromPath(fastModelPath);
-                    var fastBuilder = _fastFactory.CreateBuilder()
+                    Debug.WriteLine($"WhisperFactory created successfully");
+
+                    Debug.WriteLine($"Creating builder from factory");
+                    var fastBuilder = _fastFactory.CreateBuilder();
+                    Debug.WriteLine($"Builder created successfully");
+
+                    Debug.WriteLine($"Configuring builder: Language={_settings.Language}, Threads=4");
+                    fastBuilder = fastBuilder
                         .WithLanguage(_settings.Language)
                         .WithThreads(4);
                     ConfigurePromptAndHotwords(fastBuilder);
+                    Debug.WriteLine($"Building processor");
                     _fastProcessor = fastBuilder.Build();
+                    Debug.WriteLine($"Processor built successfully");
                     OnModelStatusChanged(new ModelStatusChangedEventArgs(
                         ServiceName,
                         FastModelLabel,
@@ -153,15 +163,25 @@ public class WhisperASRService : IASRService
                     var fileInfo = new FileInfo(accurateModelPath);
                     Debug.WriteLine($"Loading accurate model from: {fileInfo.FullName} (Size: {fileInfo.Length} bytes)");
 
+                    Debug.WriteLine($"Creating WhisperFactory from path: {accurateModelPath}");
                     _accurateFactory = WhisperFactory.FromPath(accurateModelPath);
-                    var builder = _accurateFactory.CreateBuilder()
+                    Debug.WriteLine($"WhisperFactory created successfully");
+
+                    Debug.WriteLine($"Creating builder from factory");
+                    var builder = _accurateFactory.CreateBuilder();
+                    Debug.WriteLine($"Builder created successfully");
+
+                    Debug.WriteLine($"Configuring builder: Language={_settings.Language}, Threads=4");
+                    builder = builder
                         .WithLanguage(_settings.Language)
                         .WithThreads(4);
 
                     ApplyBeamSearchSettings(builder);
 
                     ConfigurePromptAndHotwords(builder);
+                    Debug.WriteLine($"Building processor");
                     _accurateProcessor = builder.Build();
+                    Debug.WriteLine($"Processor built successfully");
                     OnModelStatusChanged(new ModelStatusChangedEventArgs(
                         ServiceName,
                         AccurateModelLabel,
@@ -327,8 +347,10 @@ public class WhisperASRService : IASRService
 
     private void ConfigureGpuRuntime()
     {
+        Debug.WriteLine($"ConfigureGpuRuntime: GPU.Enabled={_settings.GPU.Enabled}, GPU.Type={_settings.GPU.Type}, GPU.DeviceId={_settings.GPU.DeviceId}");
         if (!_settings.GPU.Enabled)
         {
+            Debug.WriteLine("ConfigureGpuRuntime: GPU disabled, clearing environment variables");
             Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
             Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
             return;
@@ -337,6 +359,7 @@ public class WhisperASRService : IASRService
         var effectiveGpuType = _settings.GPU.Type;
         if (effectiveGpuType == GPUType.Auto)
         {
+            Debug.WriteLine("ConfigureGpuRuntime: Auto detecting GPU type");
             effectiveGpuType = DetectGpuType();
             _settings.GPU.Type = effectiveGpuType;
             LogGpuDetection(effectiveGpuType);
@@ -346,17 +369,20 @@ public class WhisperASRService : IASRService
         {
             case GPUType.AMD_Vulkan:
                 // Vulkan実行時はデバイス番号を環境変数で指定（Whisper.net.Runtime.Vulkan/ggml-vulkan）
+                Debug.WriteLine($"ConfigureGpuRuntime: Setting Vulkan device {_settings.GPU.DeviceId}");
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", _settings.GPU.DeviceId.ToString());
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
                 break;
             case GPUType.NVIDIA_CUDA:
                 // CUDA実行時はCUDAデバイスを指定（Whisper.net.Runtime.Cublas）
+                Debug.WriteLine($"ConfigureGpuRuntime: Setting CUDA device {_settings.GPU.DeviceId}");
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", _settings.GPU.DeviceId.ToString());
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
                 break;
             case GPUType.CPU:
             case GPUType.Auto:
             default:
+                Debug.WriteLine($"ConfigureGpuRuntime: Using CPU mode (effectiveGpuType={effectiveGpuType})");
                 Environment.SetEnvironmentVariable("GGML_VK_DEVICE", null);
                 Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", null);
                 break;
