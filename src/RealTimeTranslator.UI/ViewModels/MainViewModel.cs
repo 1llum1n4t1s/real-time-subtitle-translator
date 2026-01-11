@@ -233,13 +233,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Processes.Clear();
 
         var activeProcessIds = GetActiveAudioProcessIds();
+        var currentProcessId = Environment.ProcessId;
         IEnumerable<ProcessInfo> processes;
 
         if (activeProcessIds.Count > 0)
         {
-            // アクティブなオーディオプロセスのみを表示
+            // アクティブなオーディオプロセスのみを表示（自分自身は除外）
             var allProcesses = Process.GetProcesses()
-                .Where(p => activeProcessIds.Contains(p.Id))
+                .Where(p => activeProcessIds.Contains(p.Id) && p.Id != currentProcessId)
                 .OrderBy(p => p.ProcessName)
                 .ThenBy(p => p.Id);
 
@@ -274,9 +275,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
-            // フォールバック：メインウィンドウを持つプロセスを表示
+            // フォールバック：メインウィンドウを持つプロセスを表示（自分自身は除外）
             processes = Process.GetProcesses()
-                .Where(p => p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrWhiteSpace(p.MainWindowTitle))
+                .Where(p => p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrWhiteSpace(p.MainWindowTitle) && p.Id != currentProcessId)
                 .OrderBy(p => p.ProcessName)
                 .ThenBy(p => p.Id)
                 .Select(p => new ProcessInfo

@@ -167,8 +167,8 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
             Marshal.StructureToPtr(activationParams, paramsPtr, false);
             var activationParamsPtr = new PropVariant
             {
-                vt = VarEnum.VT_BLOB,
-                blobSize = paramsSize,
+                vt = 0x41, // VT_BLOB
+                blobSize = (uint)paramsSize,
                 pointerValue = paramsPtr
             };
 
@@ -223,9 +223,14 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
         return (IAudioCaptureClient)captureClient;
     }
 
+    /// <summary>
+    /// オーディオクライアントを初期化
+    /// Process Loopback API 使用時は Loopback フラグは不要
+    /// </summary>
     private void InitializeAudioClient(IntPtr formatPointer, WaveFormat waveFormat)
     {
-        var streamFlags = AudioClientStreamFlags.Loopback;
+        // Process Loopback モードでは AudioClientStreamFlags.Loopback は使わない
+        var streamFlags = AudioClientStreamFlags.None;
         var bufferDuration = HundredNanosecondsPerSecond * AudioBufferDurationMs / 1000;
         ThrowOnError(_audioClient.Initialize(AudioClientShareMode.Shared, streamFlags, bufferDuration, 0, formatPointer, Guid.Empty));
     }
@@ -408,14 +413,30 @@ internal sealed class ProcessLoopbackCapture : IWaveIn, IDisposable
         Silent = 0x2
     }
 
+    /// <summary>
+    /// PROPVARIANT 構造体（VT_BLOB用）
+    /// Windows API仕様に準拠したレイアウト
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct PropVariant
     {
-        public VarEnum vt;
+        /// <summary>
+        /// バリアント型（VT_BLOB = 0x41 = 65）
+        /// VARTYPE は USHORT (2バイト)
+        /// </summary>
+        public ushort vt;
         public ushort wReserved1;
         public ushort wReserved2;
         public ushort wReserved3;
-        public int blobSize;
+
+        /// <summary>
+        /// BLOB データサイズ
+        /// </summary>
+        public uint blobSize;
+
+        /// <summary>
+        /// BLOB データへのポインタ
+        /// </summary>
         public IntPtr pointerValue;
     }
 
