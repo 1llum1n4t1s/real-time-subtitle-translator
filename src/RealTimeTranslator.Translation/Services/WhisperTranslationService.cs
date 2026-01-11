@@ -12,6 +12,7 @@ namespace RealTimeTranslator.Translation.Services;
 /// Whisper.net ベースのGPU翻訳サービス
 /// OpenAI Whisper の翻訳機能を使用した高精度翻訳
 /// GPU（CUDA/Vulkan/CPU）で高速実行
+/// 音声データを直接翻訳して、テキスト翻訳結果を提供
 /// </summary>
 public class WhisperTranslationService : ITranslationService
 {
@@ -85,7 +86,8 @@ public class WhisperTranslationService : ITranslationService
 
     /// <summary>
     /// テキストを翻訳
-    /// 注：Whisper.net は音声翻訳専用のため、テキスト翻訳には簡易辞書ベースの翻訳を使用
+    /// 注：このサービスは主に音声翻訳用です
+    /// テキスト翻訳の場合は、音声データが必要なため簡易的な処理のみ実行
     /// </summary>
     public async Task<TranslationResult> TranslateAsync(string text, string sourceLanguage = "en", string targetLanguage = "ja")
     {
@@ -127,8 +129,9 @@ public class WhisperTranslationService : ITranslationService
             var preprocessedText = ApplyPreTranslation(text);
             LogDebug($"[TranslateAsync] 翻訳開始: Text={preprocessedText}, Source={sourceLanguage}, Target={targetLanguage}");
 
-            // テキスト翻訳は機械学習辞書ベースの簡易翻訳を使用
-            var translatedText = await Task.Run(() => PerformTextTranslationAsync(preprocessedText, sourceLanguage, targetLanguage));
+            // テキスト翻訳: 音声データがないため、元のテキストを返す
+            // 実際の翻訳は TranslateAudioAsync で音声データを処理する際に実行される
+            var translatedText = preprocessedText;
 
             translatedText = ApplyPostTranslation(translatedText);
 
@@ -154,83 +157,8 @@ public class WhisperTranslationService : ITranslationService
     }
 
     /// <summary>
-    /// テキストの簡易翻訳（英語→日本語）
-    /// </summary>
-    private string PerformTextTranslationAsync(string text, string sourceLanguage, string targetLanguage)
-    {
-        if (sourceLanguage != "en" || targetLanguage != "ja")
-        {
-            return text;
-        }
-
-        // 英語→日本語の簡易翻訳辞書
-        var simpleDictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { "hello", "こんにちは" },
-            { "hi", "やあ" },
-            { "good morning", "おはようございます" },
-            { "good evening", "こんばんは" },
-            { "thank you", "ありがとう" },
-            { "thanks", "ありがとう" },
-            { "please", "お願いします" },
-            { "yes", "はい" },
-            { "no", "いいえ" },
-            { "sorry", "ごめんなさい" },
-            { "excuse me", "失礼します" },
-            { "good bye", "さようなら" },
-            { "goodbye", "さようなら" },
-            { "there are certain things", "確実にやるべきことがある" },
-            { "there are", "ある" },
-            { "certain things", "確実なもの" },
-            { "have to", "しなければならない" },
-            { "must", "に違いない" },
-            { "be", "である" },
-            { "are", "ある" },
-            { "is", "です" },
-            { "and", "と" },
-            { "or", "または" },
-            { "the", "" },
-            { "a", "" },
-            { "in", "に" },
-            { "on", "の上に" },
-            { "at", "で" },
-            { "from", "から" },
-            { "to", "へ" },
-            { "can", "できる" },
-            { "could", "できた" },
-            { "will", "だろう" },
-            { "would", "だったろう" },
-            { "should", "すべき" },
-            { "may", "かもしれない" },
-            { "might", "かもしれない" },
-        };
-
-        var words = text.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-        var translatedWords = new List<string>();
-
-        foreach (var word in words)
-        {
-            var cleanWord = word.TrimEnd(new[] { '.', ',', '!', '?', ';', ':' });
-            var suffix = word.Length > cleanWord.Length ? word.Substring(cleanWord.Length) : string.Empty;
-
-            if (simpleDictionary.TryGetValue(cleanWord, out var translatedWord))
-            {
-                if (!string.IsNullOrEmpty(translatedWord))
-                {
-                    translatedWords.Add(translatedWord + suffix);
-                }
-            }
-            else
-            {
-                translatedWords.Add(word);
-            }
-        }
-
-        return string.Join(" ", translatedWords);
-    }
-
-    /// <summary>
     /// 音声データを直接翻訳（Whisper.net のネイティブ機能）
+    /// キャッシュに保存し、後でテキスト翻訳として取得可能
     /// </summary>
     public async Task<string> TranslateAudioAsync(float[] audioData, string sourceLanguage = "en", string targetLanguage = "ja")
     {
@@ -244,12 +172,13 @@ public class WhisperTranslationService : ITranslationService
         {
             try
             {
-                LogDebug($"[TranslateAudioAsync] 音声翻訳開始: Source={sourceLanguage}, Target={targetLanguage}");
+                LogDebug($"[TranslateAudioAsync] 音声翻訳開始: Source={sourceLanguage}, Target={targetLanguage}, AudioLength={audioData.Length}");
 
                 var translationSegments = new List<string>();
                 await foreach (var segment in _processor.ProcessAsync(audioData))
                 {
                     translationSegments.Add(segment.Text.Trim());
+                    LogDebug($"[TranslateAudioAsync] セグメント: {segment.Text}");
                 }
 
                 var translatedText = string.Join(" ", translationSegments);
@@ -376,7 +305,7 @@ public class WhisperTranslationService : ITranslationService
                 "WhisperProcessor を作成中..."));
 
             var builder = _factory.CreateBuilder()
-                .WithLanguage("ja")  // 翻訳対象言語を日本語に指定
+                .WithLanguage("en")  // ソース言語を英語に指定
                 .WithThreads(Environment.ProcessorCount)
                 .WithTranslate();  // 翻訳モードを有効化
 

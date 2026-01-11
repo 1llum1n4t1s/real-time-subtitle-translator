@@ -643,7 +643,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var sourceLanguage = _settings.Translation.SourceLanguage;
                 var targetLanguage = _settings.Translation.TargetLanguage;
                 LoggerService.LogDebug($"[AccurateProcessingAsync] 翻訳開始: Text={accurateResult.Text}");
-                var translationResult = await _translationService.TranslateAsync(accurateResult.Text, sourceLanguage, targetLanguage);
+
+                // Whisper翻訳サービスを使用する場合は、音声データから直接翻訳
+                string translatedTextFromAudio = string.Empty;
+                if (_translationService is Translation.Services.WhisperTranslationService whisperTranslationService && _translationService.IsModelLoaded)
+                {
+                    LoggerService.LogDebug($"[AccurateProcessingAsync] 音声データから直接翻訳を開始");
+                    translatedTextFromAudio = await whisperTranslationService.TranslateAudioAsync(item.Segment.AudioData, sourceLanguage, targetLanguage);
+                    LoggerService.LogDebug($"[AccurateProcessingAsync] 音声翻訳結果: {translatedTextFromAudio}");
+                }
+
+                // 音声翻訳に失敗した場合はテキスト翻訳にフォールバック
+                var translationResult = !string.IsNullOrEmpty(translatedTextFromAudio)
+                    ? new TranslationResult
+                    {
+                        OriginalText = accurateResult.Text,
+                        TranslatedText = translatedTextFromAudio,
+                        SourceLanguage = sourceLanguage,
+                        TargetLanguage = targetLanguage,
+                        FromCache = false,
+                        ProcessingTimeMs = 0
+                    }
+                    : await _translationService.TranslateAsync(accurateResult.Text, sourceLanguage, targetLanguage);
+
                 LoggerService.LogDebug($"[AccurateProcessingAsync] 翻訳完了: Original={accurateResult.Text}, Translated={translationResult.TranslatedText}, FromCache={translationResult.FromCache}, Time={translationResult.ProcessingTimeMs}ms");
                 if (token.IsCancellationRequested || !IsRunning)
                 {
