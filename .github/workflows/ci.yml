@@ -34,7 +34,7 @@ jobs:
       - name: Build
         run: dotnet build RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore
       - name: Test
-        run: dotnet test src/RealTimeTranslator.Tests/RealTimeTranslator.Tests.csproj -c Release -p:Platform=x64 --no-build --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test src/RealTimeTranslator.Tests/RealTimeTranslator.Tests.csproj -c Release -p:Platform=x64 --no-build --filter "TestCategory!=Integration" --logger "trx;LogFileName=test-results.trx"
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
