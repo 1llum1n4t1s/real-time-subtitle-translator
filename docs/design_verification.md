@@ -55,7 +55,7 @@
 - ゲイン正規化、VAD
 
 **実装状況:**
-- `AudioCaptureService`: NAudio.WasapiLoopbackCaptureを使用
+- `AudioCaptureService`: NAudio 4.x `WasapiRecorderBuilder.WithProcessLoopback` を使用
 - `ConvertToFloat()`: PCM/float変換
 - `Resample()`: 16kHzへのリサンプリング
 - `ConvertToMono()`: モノラル変換

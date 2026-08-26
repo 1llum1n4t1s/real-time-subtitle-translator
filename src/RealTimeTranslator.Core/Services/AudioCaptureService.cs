@@ -15,7 +15,7 @@ namespace RealTimeTranslator.Core.Services;
 
 /// <summary>
 /// 音声キャプチャサービス
-/// WasapiCapture を使用したプロセス単位のオーディオキャプチャを実装
+/// WasapiRecorder を使用したプロセス単位のオーディオキャプチャを実装
 /// </summary>
 public class AudioCaptureService : IAudioCaptureService
 {
@@ -23,8 +23,11 @@ public class AudioCaptureService : IAudioCaptureService
     private const int MonoChannelCount = 1; // モノラルチャンネル数
     private const int BytesPerFloat = 4;
     private const int RetryIntervalMs = 1000; // リトライ間隔（ミリ秒）
+    private const int ProcessLoopbackBufferMs = 20; // 旧フォーク版と同じ Process Loopback バッファ長
+    private const int CaptureStateTransitionTimeoutMs = 3000;
     private const int MaxBufferSize = 48000; // 最大バッファサイズ（1秒分の48kHzオーディオ）
-    private IWaveIn? _capture;
+    private static readonly WaveFormat ProcessLoopbackFormat = new(48000, 16, 2);
+    private WasapiRecorder? _capture;
     private WaveFormat? _targetFormat;
     private readonly AudioCaptureSettings _settings;
     // Queue&lt;float&gt; を使うことで先頭からの Dequeue が O(1) になる。
@@ -107,20 +110,19 @@ public class AudioCaptureService : IAudioCaptureService
         _targetProcessId = processId;
         _audioBuffer.Clear();
 
-        _capture = new ProcessLoopbackCapture(_targetProcessId);
-        _capture.DataAvailable += OnDataAvailable;
-        _capture.RecordingStopped += OnRecordingStopped;
-
-        _capture.StartRecording();
+        _capture = CreateProcessLoopbackRecorderAsync(_targetProcessId, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        AttachCaptureEvents();
+        StartRecorderAsync(_capture, CancellationToken.None).GetAwaiter().GetResult();
         _isCapturing = true;
     }
 
     /// <summary>
     /// 指定したプロセスIDの音声キャプチャを開始（リトライ付き）
-    /// ProcessLoopbackCapture を使用してプロセス単位のキャプチャを実現
+    /// WasapiRecorderBuilder を使用してプロセス単位のキャプチャを実現
     /// </summary>
     /// <inheritdoc />
-    public async Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken, SynchronizationContext? captureCreationContext = null)
+    public async Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken)
     {
         if (processId <= 0)
             throw new ArgumentOutOfRangeException(nameof(processId), "プロセスIDは正の値で指定してください。");
@@ -149,31 +151,27 @@ public class AudioCaptureService : IAudioCaptureService
         var retryStopwatch = Stopwatch.StartNew();
         var maxRetries = 30;
 
-        LoggerService.LogInfo($"[キャプチャ] 受け取ったプロセスID={processId} で CreateForProcessCaptureAsync を実行します");
-        LoggerService.LogDebug($"StartCaptureWithRetryAsync: Starting process capture for PID {processId}, captureCreationContext={(captureCreationContext != null ? "UI" : "null")}");
+        LoggerService.LogInfo($"[キャプチャ] 受け取ったプロセスID={processId} で WasapiRecorder を構築します");
+        LoggerService.LogDebug($"StartCaptureWithRetryAsync: Starting process capture for PID {processId}");
 
         while (retryCount < maxRetries && !cancellationToken.IsCancellationRequested)
         {
             try
             {
-                if (captureCreationContext != null)
-                {
-                    await RunFullCaptureStartOnContextAsync(captureCreationContext, processId).ConfigureAwait(false);
-                }
-                else
-                {
-                    // 対象プロセス (とその子) の音声を取り込む (IncludeTargetProcessTree)。 ProcessLoopbackMode enum を
-                    // Windows 公式準拠 (INCLUDE=0/EXCLUDE=1) に修正したのに伴い includeProcessTree=true を指定 (ネイティブ動作は従来と不変)。
-                    var capture = await WasapiCapture.CreateForProcessCaptureAsync(processId, true).ConfigureAwait(false);
-                    _capture = capture;
-                    AttachCaptureEvents();
-                    _capture.StartRecording();
-                }
+                _capture = await CreateProcessLoopbackRecorderAsync(processId, cancellationToken).ConfigureAwait(false);
+                AttachCaptureEvents();
+                await StartRecorderAsync(_capture, cancellationToken).ConfigureAwait(false);
                 _isCapturing = true;
 
                 OnCaptureStatusChanged("音声キャプチャを開始しました。", false);
                 LoggerService.LogInfo($"StartCaptureWithRetryAsync: Successfully started capture for process {processId}");
                 return true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CleanupCapture();
+                OnCaptureStatusChanged("音声キャプチャがキャンセルされました。", false);
+                return false;
             }
             catch (ArgumentException argEx)
             {
@@ -183,8 +181,8 @@ public class AudioCaptureService : IAudioCaptureService
             }
             catch (InvalidOperationException opEx)
             {
-                // WasapiCapture がサポートされていない環境の可能性
-                LoggerService.LogWarning($"StartCaptureWithRetryAsync: WasapiCapture not supported - {opEx.Message}");
+                // WasapiRecorder がサポートされていない環境の可能性
+                LoggerService.LogWarning($"StartCaptureWithRetryAsync: WasapiRecorder not supported - {opEx.Message}");
                 CleanupCapture();
                 return false;
             }
@@ -225,45 +223,55 @@ public class AudioCaptureService : IAudioCaptureService
         return false;
     }
 
-    /// <summary>
-    /// 指定した SynchronizationContext（UI）上で、CreateForProcessCaptureAsync の await 継続からイベント登録・StartRecording までを一括で実行する。
-    /// NAudio の Process Loopback テストと同様に、create と start を同一 UI スレッドの async フローで行うことで収録を有効にする。
-    /// </summary>
-    /// <summary>
-    /// Process Loopback は CreateForProcessCaptureAsync の await 継続が実行されるスレッドの SynchronizationContext が WasapiCapture に保存される。
-    /// そのため Post コールバック内で await に ConfigureAwait(true) を付けて継続を同一スレッドにし、同じスレッドで StartRecording を呼ぶ。
-    /// </summary>
-    private async Task RunFullCaptureStartOnContextAsync(SynchronizationContext context, int processId)
+    private static Task<WasapiRecorder> CreateProcessLoopbackRecorderAsync(
+        int processId,
+        CancellationToken cancellationToken)
     {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        context.Post(_ =>
+        return new WasapiRecorderBuilder()
+            .WithProcessLoopback((uint)processId, ProcessLoopbackMode.IncludeTargetProcessTree)
+            .WithFormat(ProcessLoopbackFormat)
+            .WithBufferLength(ProcessLoopbackBufferMs)
+            .BuildAsync(cancellationToken);
+    }
+
+    private static async Task StartRecorderAsync(
+        WasapiRecorder capture,
+        CancellationToken cancellationToken)
+    {
+        capture.StartRecording();
+
+        // NAudio 4.0.0 は StartRecording 直後に StopRecording すると、capture thread が
+        // Stopping を Capturing で上書きして Dispose が永久待ちになる競合がある。
+        // Capturing への遷移を確認してから開始成功を返し、呼び出し側の即時 Stop を安全にする。
+        var stopwatch = Stopwatch.StartNew();
+        while (capture.CaptureState == CaptureState.Starting
+               && stopwatch.ElapsedMilliseconds < CaptureStateTransitionTimeoutMs)
         {
-            async void Run()
-            {
-                var threadId = Thread.CurrentThread.ManagedThreadId;
-                var syncCtxBefore = SynchronizationContext.Current;
-                LoggerService.LogDebug($"[Capture] Post callback started: ThreadId={threadId}, SyncContextNull={syncCtxBefore == null}");
-                try
-                {
-                    // ConfigureAwait(true) で継続をこのスレッドに固定。ここで WasapiCapture が SyncContext をキャプチャする。
-                    // includeProcessTree=true で対象プロセス (とその子) を取り込む (enum 公式準拠化に伴いネイティブ動作は不変の Include)。
-                    var capture = await WasapiCapture.CreateForProcessCaptureAsync(processId, true).ConfigureAwait(true);
-                    var threadIdAfter = Thread.CurrentThread.ManagedThreadId;
-                    var syncCtxAfter = SynchronizationContext.Current;
-                    LoggerService.LogDebug($"[Capture] CreateForProcessCaptureAsync continuation: ThreadId={threadIdAfter}, SyncContextNull={syncCtxAfter == null}, sameThread={threadId == threadIdAfter}");
-                    _capture = capture;
-                    AttachCaptureEvents();
-                    _capture.StartRecording();
-                    tcs.TrySetResult();
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetException(ex);
-                }
-            }
-            Run();
-        }, null);
-        await tcs.Task.ConfigureAwait(false);
+            await Task.Delay(10).ConfigureAwait(false);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (capture.CaptureState != CaptureState.Capturing)
+        {
+            throw new InvalidOperationException(
+                $"WasapiRecorder が開始状態へ遷移しませんでした: {capture.CaptureState}");
+        }
+    }
+
+    private static void StopAndDisposeRecorder(WasapiRecorder capture)
+    {
+        if (capture.CaptureState == CaptureState.Starting)
+        {
+            _ = SpinWait.SpinUntil(
+                () => capture.CaptureState != CaptureState.Starting,
+                CaptureStateTransitionTimeoutMs);
+        }
+
+        if (capture.CaptureState != CaptureState.Stopped)
+        {
+            capture.StopRecording();
+        }
+        capture.Dispose();
     }
 
     /// <summary>
@@ -272,11 +280,7 @@ public class AudioCaptureService : IAudioCaptureService
     private void AttachCaptureEvents()
     {
         if (_capture == null) return;
-        if (_capture is WasapiCapture wasapi)
-        {
-            _packetCount = 0;
-            wasapi.CapturePacketReceived += OnCapturePacketReceived;
-        }
+        _packetCount = 0;
         LoggerService.LogDebug($"StartCaptureWithRetryAsync: Capture WaveFormat SampleRate={_capture.WaveFormat.SampleRate}, Channels={_capture.WaveFormat.Channels}, BitsPerSample={_capture.WaveFormat.BitsPerSample}, Encoding={_capture.WaveFormat.Encoding}");
         _dataAvailableCallCount = 0;
         _capture.DataAvailable += OnDataAvailable;
@@ -290,29 +294,10 @@ public class AudioCaptureService : IAudioCaptureService
     {
         if (_capture != null)
         {
-            if (_capture is WasapiCapture wasapi)
-            {
-                wasapi.CapturePacketReceived -= OnCapturePacketReceived;
-            }
             _capture.DataAvailable -= OnDataAvailable;
             _capture.RecordingStopped -= OnRecordingStopped;
-            if (_capture is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
+            StopAndDisposeRecorder(_capture);
             _capture = null;
-        }
-    }
-
-    /// <summary>
-    /// 診断用: パケットごとの Silent フラグをログ（500 パケットに 1 回、または Silent のときのみ）
-    /// </summary>
-    private void OnCapturePacketReceived(object? sender, WasapiCapturePacketEventArgs e)
-    {
-        var n = Interlocked.Increment(ref _packetCount);
-        if (n % 500 == 0 || e.IsSilent)
-        {
-            LoggerService.LogDebug($"[Packet] #{n} IsSilent={e.IsSilent}, Flags={e.BufferFlags}, Frames={e.FramesAvailable}");
         }
     }
 
@@ -344,22 +329,10 @@ public class AudioCaptureService : IAudioCaptureService
                 return;
             }
 
-            if (_capture is WasapiCapture wasapi)
-            {
-                wasapi.CapturePacketReceived -= OnCapturePacketReceived;
-            }
             _capture.DataAvailable -= OnDataAvailable;
             _capture.RecordingStopped -= OnRecordingStopped;
 
-            if (_isCapturing)
-            {
-                _capture.StopRecording();
-            }
-
-            if (_capture is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
+            StopAndDisposeRecorder(_capture);
             _capture = null;
             _isCapturing = false;
         }
@@ -369,21 +342,34 @@ public class AudioCaptureService : IAudioCaptureService
         }
     }
 
-    private void OnDataAvailable(object? sender, WaveInEventArgs e)
+    private void OnDataAvailable(
+        ReadOnlySpan<byte> buffer,
+        AudioClientBufferFlags flags,
+        long devicePosition,
+        long qpcPosition)
     {
-        if (e.BytesRecorded == 0)
+        var capture = _capture;
+        if (buffer.IsEmpty || capture == null)
             return;
+
+        var packetCount = Interlocked.Increment(ref _packetCount);
+        var isSilent = (flags & AudioClientBufferFlags.Silent) != 0;
+        if (packetCount % 500 == 0 || isSilent)
+        {
+            LoggerService.LogDebug($"[Packet] #{packetCount} IsSilent={isSilent}, Flags={flags}, Bytes={buffer.Length}, DevicePosition={devicePosition}, QpcPosition={qpcPosition}");
+        }
 
         // NAudio の内部バッファは再利用されるため即コピーしてから扱う。
         // ArrayPool 借用で Gen0 ヒープ通過量を削減 (このメソッドは ~100ms ごとに発火、
         // 48kHz/2ch/float32 = 38.4 KB/call * 10 calls/sec = 385 KB/s = 約 685 MB/30min)。
-        // Rent は要求以上のサイズを返すため、 サイズ参照箇所は必ず e.BytesRecorded を使う。
-        var bufferCopy = ArrayPool<byte>.Shared.Rent(e.BytesRecorded);
+        // Rent は要求以上のサイズを返すため、 サイズ参照箇所は必ず buffer.Length を使う。
+        var bytesRecorded = buffer.Length;
+        var bufferCopy = ArrayPool<byte>.Shared.Rent(bytesRecorded);
         try
         {
-            Array.Copy(e.Buffer, 0, bufferCopy, 0, e.BytesRecorded);
+            buffer.CopyTo(bufferCopy);
 
-            var sourceFormat = _capture!.WaveFormat;
+            var sourceFormat = capture.WaveFormat;
             var callCount = Interlocked.Increment(ref _dataAvailableCallCount);
             if (callCount == 1)
             {
@@ -400,12 +386,12 @@ public class AudioCaptureService : IAudioCaptureService
             var logHex = callCount <= 3 || callCount % 100 == 0;
             if (logHex)
             {
-                var len = Math.Min(16, e.BytesRecorded);
+                var len = Math.Min(16, bytesRecorded);
                 var hex = BitConverter.ToString(bufferCopy, 0, len).Replace("-", " ");
                 LoggerService.LogDebug($"[Capture] #{callCount} bufferCopy (first {len} bytes): {hex}");
             }
             // NAudio の RawSourceWaveStream ＋ ToSampleProvider で float 変換（2ch の場合は StereoToMono 含む）
-            var samples = ConvertToFloat(bufferCopy, e.BytesRecorded, sourceFormat);
+            var samples = ConvertToFloat(bufferCopy, bytesRecorded, sourceFormat);
 
             // max スキャン・raw16 範囲・avg は「無音フラグ未確定時」または「診断ログ出力時」のみ計算する。
             // フラグ確定後 (= 一度でも有音を受信後) の常時全サンプル走査 (約10回/秒) は
@@ -425,13 +411,13 @@ public class AudioCaptureService : IAudioCaptureService
                 if (needLog)
                 {
                     // 16bit PCM の生値範囲はログ出力時のみ取得（毎チャンクの全走査を排除）。
-                    var (raw16Min, raw16Max) = GetRaw16BitRange(bufferCopy, e.BytesRecorded, sourceFormat);
+                    var (raw16Min, raw16Max) = GetRaw16BitRange(bufferCopy, bytesRecorded, sourceFormat);
                     var sum = 0f;
                     for (var i = 0; i < samples.Length; i++)
                         sum += Math.Abs(samples[i]);
                     var avg = samples.Length > 0 ? sum / samples.Length : 0f;
                     var raw16Str = raw16Min.HasValue ? $", raw16=[{raw16Min.Value},{raw16Max!.Value}]" : "";
-                    LoggerService.LogDebug($"[Capture] OnDataAvailable #{callCount}: bytes={e.BytesRecorded}, samples={samples.Length}, max={max:F6}, avg={avg:F6}{raw16Str}");
+                    LoggerService.LogDebug($"[Capture] OnDataAvailable #{callCount}: bytes={bytesRecorded}, samples={samples.Length}, max={max:F6}, avg={avg:F6}{raw16Str}");
                     // raw16 が -1～1 のみで再生の有無で変わらない場合は、実音ではなくドライバのプレースホルダーと判断
                     if (!_loggedPlaceholderWarning && raw16Min.HasValue && raw16Max.HasValue
                         && raw16Min.Value >= -1 && raw16Max.Value <= 1 && (raw16Min.Value < 0 || raw16Max.Value > 0))
@@ -556,7 +542,7 @@ public class AudioCaptureService : IAudioCaptureService
         if (format.Channels == 1)
         {
             var samples = new float[totalSamples];
-            var read = sourceProvider.Read(samples, 0, totalSamples);
+            var read = sourceProvider.Read(samples);
             return read == totalSamples ? samples : samples.AsSpan(0, read).ToArray();
         }
         if (format.Channels == 2)
@@ -564,11 +550,11 @@ public class AudioCaptureService : IAudioCaptureService
             var stereoTomono = new StereoToMonoSampleProvider(sourceProvider);
             var monoCount = totalSamples / 2;
             var samples = new float[monoCount];
-            var read = stereoTomono.Read(samples, 0, monoCount);
+            var read = stereoTomono.Read(samples);
             return read == monoCount ? samples : samples.AsSpan(0, read).ToArray();
         }
         var allSamples = new float[totalSamples];
-        var totalRead = sourceProvider.Read(allSamples, 0, totalSamples);
+        var totalRead = sourceProvider.Read(allSamples);
         return ConvertToMono(allSamples.AsSpan(0, totalRead).ToArray(), format.Channels);
     }
 

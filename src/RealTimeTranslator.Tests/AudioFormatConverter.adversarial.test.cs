@@ -231,8 +231,11 @@ public sealed class AudioFormatConverterAdversarialTests
     /// <adversarial category="resource" severity="medium" />
     [TestMethod]
     [TestCategory("Adversarial")]
+    [DoNotParallelize]
     public void ResampleTo24kHz_RepeatedCalls_ShouldNotLeakMemory()
     {
+        // NAudio/WDL の初回型ロード・JIT を定常時の保持メモリと誤認しないようウォームアップする。
+        _ = AudioFormatConverter.ResampleTo24kHz(new float[1600]);
         var before = GC.GetTotalMemory(true);
         for (int i = 0; i < 100; i++)
         {

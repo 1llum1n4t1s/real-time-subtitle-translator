@@ -12,6 +12,7 @@ namespace RealTimeTranslator.Tests;
 
 internal sealed class TestAudioCaptureService : IAudioCaptureService
 {
+    public int StopCaptureCallCount { get; private set; }
     public bool IsCapturing => false;
     public bool HasReceivedNonSilentDataSinceStart => false;
 #pragma warning disable CS0067
@@ -19,8 +20,8 @@ internal sealed class TestAudioCaptureService : IAudioCaptureService
     public event EventHandler<CaptureStatusEventArgs>? CaptureStatusChanged;
 #pragma warning restore CS0067
     public void StartCapture(int processId) { }
-    public Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken, SynchronizationContext? captureCreationContext = null) => Task.FromResult(true);
-    public void StopCapture() { }
+    public Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken) => Task.FromResult(true);
+    public void StopCapture() => StopCaptureCallCount++;
     public void ApplySettings(AudioCaptureSettings settings) { }
     public void Dispose() { }
 }
@@ -47,6 +48,8 @@ internal sealed class StubOptionsMonitor : IOptionsMonitor<AppSettings>
 /// </summary>
 internal sealed class TestRealtimeTranscriber : IRealtimeTranscriber
 {
+    public int ConnectCallCount { get; private set; }
+    public int DisconnectCallCount { get; private set; }
     public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
     public long TotalAudioInputSamples24kHz => 0;
     public long ServerReportedAudioInputTokens => 0;
@@ -61,6 +64,7 @@ internal sealed class TestRealtimeTranscriber : IRealtimeTranscriber
 
     public Task ConnectAsync(OpenAIRealtimeSettings settings, CancellationToken ct = default)
     {
+        ConnectCallCount++;
         State = ConnectionState.Connected;
         StateChanged?.Invoke(State);
         return Task.CompletedTask;
@@ -68,6 +72,7 @@ internal sealed class TestRealtimeTranscriber : IRealtimeTranscriber
     public void SendAudio(byte[] pcm16Audio) { }
     public Task DisconnectAsync()
     {
+        DisconnectCallCount++;
         State = ConnectionState.Disconnected;
         StateChanged?.Invoke(State);
         return Task.CompletedTask;

@@ -4,9 +4,18 @@
     "net10.0-windows10.0.20348": {
       "1llum1n4t1s.NAudio": {
         "type": "Direct",
-        "requested": "[1.0.49, )",
-        "resolved": "1.0.49",
-        "contentHash": "okY27WnAtKmAcrlGPgafIgaplr20STsLBVFM78CvdE2NljaX9QR7TD7P8KFXcWFxCCPjSO0YzPz5vRguTKTTEQ=="
+        "requested": "[4.0.0, )",
+        "resolved": "4.0.0",
+        "contentHash": "soNlvT3FI+7KVJh8m95PIDuhSKINGGUTW7o9i6XC62HF1q1T8Y0+luM8CQNqTgAA/xU34K6Ux1sdom3sz0fkRQ==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Asio": "4.0.0",
+          "1llum1n4t1s.NAudio.Core": "4.0.0",
+          "1llum1n4t1s.NAudio.Dmo": "4.0.0",
+          "1llum1n4t1s.NAudio.Midi": "4.0.0",
+          "1llum1n4t1s.NAudio.Wasapi": "4.0.0",
+          "1llum1n4t1s.NAudio.WinForms": "4.0.0",
+          "1llum1n4t1s.NAudio.WinMM": "4.0.0"
+        }
       },
       "Microsoft.CognitiveServices.Speech": {
         "type": "Direct",
@@ -26,17 +35,6 @@
           "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
         }
       },
-      "Microsoft.Windows.CsWin32": {
-        "type": "Direct",
-        "requested": "[0.3.298, )",
-        "resolved": "0.3.298",
-        "contentHash": "moz/CojV5HSeJYV9pNVE6mWMKnJGvPgdD31EhBLyUJ8Ui06PBrH9oPFK1ljXbJJMM4EzKnkE1a0AtBbH1BHDGA==",
-        "dependencies": {
-          "Microsoft.Windows.SDK.Win32Docs": "0.1.42-alpha",
-          "Microsoft.Windows.SDK.Win32Metadata": "70.0.11-preview",
-          "Microsoft.Windows.WDK.Win32Metadata": "0.13.25-experimental"
-        }
-      },
       "SuperLightLogger": {
         "type": "Direct",
         "requested": "[1.0.12, )",
@@ -53,6 +51,63 @@
         "requested": "[10.0.10, )",
         "resolved": "10.0.10",
         "contentHash": "BKt0SQgq2lq3ESE68jkeLwv95ypANrPDtkTOIFGcnhg2aRUeUUBDrQlkVDZctrg1WenVcvn5P5XZnuYI7q6rFQ=="
+      },
+      "1llum1n4t1s.NAudio.Asio": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "rjxDs3Mqsn34ft46q39KIXkxs6/H2zZwNjxWGJBQU1Ix95/STDliT2UnX6KNzT3tUaoFtFSTYNxy0OToswmMpg==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.Core": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "sTuD5g4OIss9LNcifhpOAuGQC4ExS3ua5T9Q2305gzjmf3z1vGwXQ1AuTtXXy9Uiq+yy0on4bDhgmOsFPbESmg==",
+        "dependencies": {
+          "System.Numerics.Tensors": "10.0.11"
+        }
+      },
+      "1llum1n4t1s.NAudio.Dmo": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "MyMSOeNfbwZ5EHxZPzGZNFpt+u9YVD6ta8pdkomNRyrGtmpAPBq+jSmE0T1H8TlRJIMxkWYqq9r8fRUh9pDIzw==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.Midi": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "dAuElJ4/Ce7GhZLEai4owcFPoNhqlSojTjbVb/tAvf5fA/EOdMwfJVKGFmNPP8N8ZpeT+l2wr5clexEj0MrQtA==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.Wasapi": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "Te2RtcegN3pty98frKo37vlDZb64qTfSgWmufx+DMYLySHO38/9c31I6z1C0rVHtlj8pO98B9kITWsHBJqtVHw==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.WinForms": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "49cxzC9JN3buA7h/RRfdhVFNAEB5v5sZnUvp+Z2XpRbwtLrkUcmLH/LznUyddkmVdbcyNjQjRzq42ZhktFTXRA==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.WinMM": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.WinMM": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "ZhDTHlqlX9Wh+pb1qA5zq/8cYykJfU8w4LQ3QFp+Te15dKj+K5uuHuRjDkCTrEAk/8zem3E8ynuYN6GG9WlbOA==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0",
+          "1llum1n4t1s.NAudio.Midi": "4.0.0"
+        }
       },
       "Azure.Core": {
         "type": "Transitive",
@@ -122,24 +177,6 @@
           "System.Numerics.Tensors": "9.0.0"
         }
       },
-      "Microsoft.Windows.SDK.Win32Docs": {
-        "type": "Transitive",
-        "resolved": "0.1.42-alpha",
-        "contentHash": "Z/9po23gUA9aoukirh2ItMU2ZS9++Js9Gdds9fu5yuMojDrmArvY2y+tq9985tR3cxFxpZO1O35Wjfo0khj5HA=="
-      },
-      "Microsoft.Windows.SDK.Win32Metadata": {
-        "type": "Transitive",
-        "resolved": "70.0.11-preview",
-        "contentHash": "i8Dv2KCKzH8MQAsgLeUa5zFGyQOoz+TlvnbkFUkjsUtqhj4oguVj9rDpVACs5fLayZbwItOSllf+bhwr+z2yeg=="
-      },
-      "Microsoft.Windows.WDK.Win32Metadata": {
-        "type": "Transitive",
-        "resolved": "0.13.25-experimental",
-        "contentHash": "IM50tb/+UIwBr9FMr6ZKcZjCMW+Axo6NjGqKxgjUfyCY8dRnYUfrJEXxAaXoWtYP4X8EmASmC1Jtwh4XucseZg==",
-        "dependencies": {
-          "Microsoft.Windows.SDK.Win32Metadata": "63.0.31-preview"
-        }
-      },
       "System.ClientModel": {
         "type": "Transitive",
         "resolved": "1.1.0",
@@ -155,8 +192,8 @@
       },
       "System.Numerics.Tensors": {
         "type": "Transitive",
-        "resolved": "9.0.0",
-        "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
+        "resolved": "10.0.11",
+        "contentHash": "4jNNt67NhCqf3bf2FN0mrsC+EH60L7Sny6poqVeiviB27Kw7TQzMmgn8HIaPc8E9EcuGusUyfeu21gLfzcBpDA=="
       }
     },
     "net10.0-windows10.0.20348/win-x64": {

@@ -31,7 +31,7 @@ public sealed class AudioLevelMonitorTests
 #pragma warning restore CS0067
 
         public void StartCapture(int processId) { IsCapturing = true; }
-        public Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken, SynchronizationContext? captureCreationContext = null)
+        public Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken)
         {
             IsCapturing = StartResult;
             return Task.FromResult(StartResult);

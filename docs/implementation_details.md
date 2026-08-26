@@ -1,8 +1,8 @@
 # 実装詳細
 
 ## 音声キャプチャ (NAudio)
-- `WasapiLoopbackCapture` を使用してシステム音声をキャプチャ。
-- 特定プロセスの音声のみを取得するために、WindowsのオーディオセッションAPIを利用。
+- 1llum1n4t1s.NAudio 4.x の `WasapiRecorderBuilder.WithProcessLoopback` で、指定プロセスと子プロセスだけをキャプチャ。
+- 48kHz / 16-bit / stereo、20ms バッファで取得し、アプリ側で mono 化と VAD・送信用の並列リサンプリングを行う。
 
 ## 音声認識 (Whisper.net)
 - `Whisper.net` ライブラリを使用して、ローカルでGGUF形式のモデルを実行。

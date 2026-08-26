@@ -14,22 +14,22 @@ RealTimeTranslator is a Windows desktop app for real-time subtitle translation. 
 
 ```bash
 # 1 回だけ実行 (lockfile を win-x64 RID 込みで生成)
-rtk dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate
+dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate
 
 # 以降は必ず --no-restore を付ける (暗黙 restore が lockfile から RID を消すのを抑止)
-rtk dotnet build RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore
+dotnet build RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore
 
 # Run tests (MSTest)、 --no-restore + --no-build で再ビルドも抑止
-rtk dotnet test RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore --no-build
+dotnet test RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore --no-build
 
 # Run unit tests only (exclude integration)
-rtk dotnet test RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore --no-build --filter "TestCategory!=Integration"
+dotnet test RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore --no-build --filter "TestCategory!=Integration"
 
 # Run the app
-rtk dotnet run --project src/RealTimeTranslator.UI -c Release -p:Platform=x64 --no-restore
+dotnet run --project src/RealTimeTranslator.UI -c Release -p:Platform=x64 --no-restore
 
 # Publish (self-contained, win-x64)
-rtk dotnet publish src/RealTimeTranslator.UI -c Release -r win-x64 --self-contained --no-restore
+dotnet publish src/RealTimeTranslator.UI -c Release -r win-x64 --self-contained --no-restore
 ```
 
 **なぜ `--no-restore` が必須か**: `dotnet build` / `dotnet test` を裸で実行すると暗黙 restore が走り、
@@ -47,13 +47,13 @@ OmniSharp 等が裏で **裸 restore を走らせ続け**、 working tree の `p
 commit すると CI publish が NU1004 で落ちる (`The project's runtime identifiers have changed from. ... lock file's
 runtime identifiers .` が出たらこれ)。 リリース時はこう動く:
 
-- **コミット前後で staged / committed blob を検証する**: `rtk git show :src/RealTimeTranslator.Core/packages.lock.json | grep -c win-x64`
-  で staged blob に win-x64 が 1 以上あることを確認してから commit、 commit 後も `rtk git show HEAD:<path>` で再確認してから
+- **コミット前後で staged / committed blob を検証する**: `git show :src/RealTimeTranslator.Core/packages.lock.json | grep -c win-x64`
+  で staged blob に win-x64 が 1 以上あることを確認してから commit、 commit 後も `git show HEAD:<path>` で再確認してから
   push する。 working tree の grep だけ見ると「直ったつもり」で剥がれた版を commit してしまう。
-- **パッケージ版を変えたリリース** → `rtk dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate && rtk git add <3 lockfile>`
+- **パッケージ版を変えたリリース** → `dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate && git add <3 lockfile>`
   を **同一コマンドチェーンで atomic に** 実行する。 restore と git add の間に別ツール (= 裏 restore の発火点) を挟ませず、
   剥がれる前に index へ win-x64 を確定させる。
-- **パッケージ版を変えないリリース (doc のみ等)** → lockfile は **staged しない**。 `rtk git checkout HEAD -- <剥がれた lockfile>`
+- **パッケージ版を変えないリリース (doc のみ等)** → lockfile は **staged しない**。 `git checkout HEAD -- <剥がれた lockfile>`
   で HEAD の正しい版に戻すか、 whitelist (バージョンファイル + README 等) だけ stage すれば、 commit には HEAD の win-x64 入り
   lockfile がそのまま引き継がれる。
 
@@ -78,7 +78,7 @@ MSTest、 `TestCategory!=Integration` フィルタでユニットテストのみ
 | `SubtitleDisplayItem.test.cs` | オーバーレイ表示アイテムの状態遷移 |
 | `TranslationLogEntry.test.cs` | TSV シリアライズ / パース |
 | `UpdateSettings.test.cs` | Velopack 更新設定 / feed URI 防御チェック |
-| `ProcessLoopbackCaptureTests.cs` | Process Loopback の InternalsVisibleTo 検証 (`TestCategory="Integration"` 含む) |
+| `ProcessLoopbackCaptureTests.cs` | NAudio 4.x `WasapiRecorderBuilder` の構築・キャンセル契約 + 実機 Process Loopback (`Integration`) |
 
 ## Architecture
 
@@ -113,7 +113,7 @@ Audio Capture (WASAPI native 48kHz/2ch)
 |---|---|
 | `OpenAIRealtimeClient` | WebSocket client for OpenAI Realtime Translate API. Handles connection, reconnection (exponential backoff), audio send/receive loops |
 | `AudioFormatConverter` / `StreamingResampler` | リサンプル本体は `StreamingResampler` (v1.0.21 導入、 WDL sinc 補間の状態保持版で chunk 境界クリック防止)。 `AudioFormatConverter.Float32ToPcm16` は静的 PCM16 変換だけ使用。 `AudioFormatConverter.ResampleTo24kHz` はテスト reference 用に残置 (プロダクション未使用) |
-| `AudioCaptureService` | WASAPI process loopback capture with custom COM interop + NAudio |
+| `AudioCaptureService` | NAudio 4.x `WasapiRecorderBuilder` による WASAPI process loopback capture |
 | `AudioLevelMonitor` (`IAudioLevelMonitor`) | 「開始」前のプレビュー音量メーター。 専用 `AudioCaptureService` で選択プロセスをキャプチャ → 入力ゲイン適用後ピークを `LevelUpdated` 発火 (OpenAI 非送信)。 内部 CTS で無限リトライを Stop/Dispose 時に確実停止、 stale 完了の状態上書きを防ぐガード付き。 `MainViewModel` が `SelectedProcess` 変更/ゲイン変更/開始停止に合わせて起動制御 |
 | `SileroVadDetector` | Silero VAD (ONNX) で「人の声らしさ」を判定する VAD ゲート。 16kHz / 512 サンプル / 32ms フレーム固定 |
 | `CostEstimator` | OpenAI Realtime API の audio input tokens 数 / 推定コスト (USD) を計算 |

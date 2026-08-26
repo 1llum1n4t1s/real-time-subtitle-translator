@@ -64,7 +64,7 @@ public sealed class AudioLevelMonitor : IAudioLevelMonitor
 
     public event EventHandler<AudioLevelEventArgs>? LevelUpdated;
 
-    public async Task StartAsync(int processId, SynchronizationContext? captureCreationContext = null, CancellationToken cancellationToken = default)
+    public async Task StartAsync(int processId, CancellationToken cancellationToken = default)
     {
         if (_isDisposed || processId <= 0) return;
 
@@ -104,9 +104,7 @@ public sealed class AudioLevelMonitor : IAudioLevelMonitor
             try { await pendingStop.ConfigureAwait(false); } catch { /* 停止失敗は無害 */ }
             if (cts.IsCancellationRequested) return;
 
-            // WASAPI Process Loopback は STA (UI) スレッドにバインドするため、 UI コンテキストを渡す
-            // (本番パイプラインの MainViewModel.StartAsync と同じ作法)。
-            var started = await _capture.StartCaptureWithRetryAsync(processId, cts.Token, captureCreationContext).ConfigureAwait(false);
+            var started = await _capture.StartCaptureWithRetryAsync(processId, cts.Token).ConfigureAwait(false);
 
             bool isCurrent;
             bool startedButNotPublished = false;

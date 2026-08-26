@@ -7,11 +7,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="1llum1n4t1s.NAudio" Version="1.0.49" />
-    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.298">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
+    <PackageReference Include="1llum1n4t1s.NAudio" Version="4.0.0" />
     <!-- Silero VAD 推論用 (CPU 版、ネイティブ DLL は win-x64 のみ実質使用) -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
     <!-- Azure AI Speech 翻訳プロバイダ用 (TranslationRecognizer + PushAudioInputStream)。

@@ -99,6 +99,20 @@ public sealed class OpenAIRealtimeClientAdversarialTests
         catch { /* 接続失敗は想定通り */ }
 
         Assert.AreNotEqual(ConnectionState.Connected, client.State, "失敗時に Connected 状態にはならない");
+
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var shouldReconnect = (bool)typeof(OpenAIRealtimeClient).GetField("_shouldReconnect", flags)!.GetValue(client)!;
+        var cts = typeof(OpenAIRealtimeClient).GetField("_cts", flags)!.GetValue(client);
+        var ws = typeof(OpenAIRealtimeClient).GetField("_ws", flags)!.GetValue(client);
+        var capturedSettings = (OpenAIRealtimeSettings)typeof(OpenAIRealtimeClient)
+            .GetField("_settings", flags)!.GetValue(client)!;
+
+        Assert.IsFalse(shouldReconnect, "初回接続失敗後は network 復帰再接続を武装解除する");
+        Assert.IsNull(cts, "初回接続失敗後は linked CTS を解放する");
+        Assert.IsNull(ws, "初回接続失敗後は WebSocket を破棄する");
+        Assert.AreNotSame(settings, capturedSettings, "走行中変更が再接続へ漏れないよう設定をコピーする");
+        settings.ApiKey = "changed-after-connect";
+        Assert.AreEqual("sk-fake-key", capturedSettings.ApiKey);
     }
 
     /// <adversarial category="state" severity="medium" />

@@ -28,6 +28,6 @@ Whisperモデルファイル (.bin) を `models/` ディレクトリに配置し
 3. 出力ウィンドウで `[SingleInstance] PID=xxx: 既存のインスタンスを前面に表示して終了します` が出ていれば、2つ目のプロセスは自動で終了している。表示されるウィンドウは1つ（先に起動したインスタンス）になる。
 
 ## 依存ライブラリ
-- [NAudio](https://github.com/naudio/NAudio): 音声キャプチャ
+- [1llum1n4t1s.NAudio](https://github.com/1llum1n4t1s/1llum1n4t1s.NAudio): 音声キャプチャ
 - [Whisper.net](https://github.com/sandrohanea/whisper.net): Whisperランタイム
 - [Argos Translate](https://github.com/argosopentech/argos-translate): 翻訳エンジン

@@ -161,7 +161,21 @@ public sealed class OpenAIRealtimeClient : Interfaces.IRealtimeTranscriber
                 await CleanupAsync().ConfigureAwait(false);
             }
 
-            _settings = settings;
+            // セッション開始時のスナップショットを保持する。 SettingsViewModel が in-place 編集する
+            // AppSettings.OpenAIRealtime をそのまま握ると、走行中のキー／言語変更が再接続へ混ざり、
+            // 「設定変更は次の Start で反映」という provider 共通契約を破るためコピーで断つ。
+            _settings = new OpenAIRealtimeSettings
+            {
+                ApiKey = settings.ApiKey,
+                OutputLanguage = settings.OutputLanguage,
+                Model = settings.Model,
+                Endpoint = settings.Endpoint,
+                ReconnectDelayMs = settings.ReconnectDelayMs,
+                MaxReconnectAttempts = settings.MaxReconnectAttempts,
+                SilencePaddingMs = settings.SilencePaddingMs,
+                MaxPartialChars = settings.MaxPartialChars,
+                DeltaIdleFinalizeMs = settings.DeltaIdleFinalizeMs,
+            };
             _shouldReconnect = true;
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             // 容量 30: 1 chunk ≒ 80ms で約 2.4 秒分のバッファ。
@@ -173,7 +187,18 @@ public sealed class OpenAIRealtimeClient : Interfaces.IRealtimeTranscriber
                 SingleReader = true
             });
 
-            await ConnectWebSocketAsync(_cts.Token).ConfigureAwait(false);
+            try
+            {
+                await ConnectWebSocketAsync(_cts.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                // 初回接続失敗は Start の失敗であり、network 復帰時に勝手に再試行してはいけない。
+                // reconnect 経路は TryReconnectAsync が別管理するため、ここでは必ず武装解除して後始末する。
+                _shouldReconnect = false;
+                await CleanupAsync().ConfigureAwait(false);
+                throw;
+            }
         }
         finally
         {

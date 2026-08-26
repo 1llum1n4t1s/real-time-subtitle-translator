@@ -27,8 +27,74 @@
       },
       "1llum1n4t1s.NAudio": {
         "type": "Transitive",
-        "resolved": "1.0.49",
-        "contentHash": "okY27WnAtKmAcrlGPgafIgaplr20STsLBVFM78CvdE2NljaX9QR7TD7P8KFXcWFxCCPjSO0YzPz5vRguTKTTEQ=="
+        "resolved": "4.0.0",
+        "contentHash": "soNlvT3FI+7KVJh8m95PIDuhSKINGGUTW7o9i6XC62HF1q1T8Y0+luM8CQNqTgAA/xU34K6Ux1sdom3sz0fkRQ==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Asio": "4.0.0",
+          "1llum1n4t1s.NAudio.Core": "4.0.0",
+          "1llum1n4t1s.NAudio.Dmo": "4.0.0",
+          "1llum1n4t1s.NAudio.Midi": "4.0.0",
+          "1llum1n4t1s.NAudio.Wasapi": "4.0.0",
+          "1llum1n4t1s.NAudio.WinForms": "4.0.0",
+          "1llum1n4t1s.NAudio.WinMM": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.Asio": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "rjxDs3Mqsn34ft46q39KIXkxs6/H2zZwNjxWGJBQU1Ix95/STDliT2UnX6KNzT3tUaoFtFSTYNxy0OToswmMpg==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.Core": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "sTuD5g4OIss9LNcifhpOAuGQC4ExS3ua5T9Q2305gzjmf3z1vGwXQ1AuTtXXy9Uiq+yy0on4bDhgmOsFPbESmg==",
+        "dependencies": {
+          "System.Numerics.Tensors": "10.0.11"
+        }
+      },
+      "1llum1n4t1s.NAudio.Dmo": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "MyMSOeNfbwZ5EHxZPzGZNFpt+u9YVD6ta8pdkomNRyrGtmpAPBq+jSmE0T1H8TlRJIMxkWYqq9r8fRUh9pDIzw==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.Midi": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "dAuElJ4/Ce7GhZLEai4owcFPoNhqlSojTjbVb/tAvf5fA/EOdMwfJVKGFmNPP8N8ZpeT+l2wr5clexEj0MrQtA==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.Wasapi": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "Te2RtcegN3pty98frKo37vlDZb64qTfSgWmufx+DMYLySHO38/9c31I6z1C0rVHtlj8pO98B9kITWsHBJqtVHw==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.WinForms": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "49cxzC9JN3buA7h/RRfdhVFNAEB5v5sZnUvp+Z2XpRbwtLrkUcmLH/LznUyddkmVdbcyNjQjRzq42ZhktFTXRA==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.WinMM": "4.0.0"
+        }
+      },
+      "1llum1n4t1s.NAudio.WinMM": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "ZhDTHlqlX9Wh+pb1qA5zq/8cYykJfU8w4LQ3QFp+Te15dKj+K5uuHuRjDkCTrEAk/8zem3E8ynuYN6GG9WlbOA==",
+        "dependencies": {
+          "1llum1n4t1s.NAudio.Core": "4.0.0",
+          "1llum1n4t1s.NAudio.Midi": "4.0.0"
+        }
       },
       "Avalonia": {
         "type": "Transitive",
@@ -511,8 +577,8 @@
       },
       "System.Numerics.Tensors": {
         "type": "Transitive",
-        "resolved": "9.0.0",
-        "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
+        "resolved": "10.0.11",
+        "contentHash": "4jNNt67NhCqf3bf2FN0mrsC+EH60L7Sny6poqVeiviB27Kw7TQzMmgn8HIaPc8E9EcuGusUyfeu21gLfzcBpDA=="
       },
       "System.Security.Cryptography.ProtectedData": {
         "type": "Transitive",
@@ -543,7 +609,7 @@
       "realtimetranslator.core": {
         "type": "Project",
         "dependencies": {
-          "1llum1n4t1s.NAudio": "[1.0.49, )",
+          "1llum1n4t1s.NAudio": "[4.0.0, )",
           "Microsoft.CognitiveServices.Speech": "[1.51.1, )",
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "SuperLightLogger": "[1.0.12, )",

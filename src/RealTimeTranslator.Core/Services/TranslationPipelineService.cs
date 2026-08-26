@@ -205,6 +205,7 @@ public sealed class TranslationPipelineService : ITranslationPipelineService, IA
 
     public event EventHandler<SubtitleItem>? SubtitleGenerated;
     public event EventHandler<PipelineStatsEventArgs>? StatsUpdated;
+    public event EventHandler<AutoPausedEventArgs>? AutoPaused;
     public event EventHandler<Exception>? ErrorOccurred;
     public event EventHandler<AudioLevelEventArgs>? AudioLevelUpdated;
 
@@ -325,7 +326,30 @@ public sealed class TranslationPipelineService : ITranslationPipelineService, IA
         try
         {
             if (_isRunning) return;
-            await StartCoreAsync(token).ConfigureAwait(false);
+            try
+            {
+                await StartCoreAsync(token).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Connect 成功後、VAD／処理タスク初期化中に失敗した場合も半開きセッションを残さない。
+                // 初回 Connect 自体の失敗は各 client が cleanup 済みなので、資源が残る場合だけ停止する。
+                if (_activeClient.State != ConnectionState.Disconnected
+                    || _audioProcessingTask is not null
+                    || _autoPauseTask is not null
+                    || _statsTickTask is not null)
+                {
+                    try
+                    {
+                        await StopCoreAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        Logger.Warn("パイプライン開始失敗後の後始末で例外", cleanupEx);
+                    }
+                }
+                throw;
+            }
         }
         finally
         {
@@ -513,7 +537,7 @@ public sealed class TranslationPipelineService : ITranslationPipelineService, IA
         }
     }
 
-    private async Task StopCoreAsync(CancellationToken cancellationToken)
+    private async Task StopCoreAsync(CancellationToken cancellationToken, bool skipAutoPauseTaskAwait = false)
     {
         Logger.Info("翻訳パイプライン停止");
         // 未確定のまま残っている trailing を確定字幕として emit + ログ記録してから停止する
@@ -526,7 +550,7 @@ public sealed class TranslationPipelineService : ITranslationPipelineService, IA
         _idleFinalizeTimer.Change(Timeout.Infinite, Timeout.Infinite);
 
         // ⭐ WASAPI ネイティブ解放を UI スレッドから外す。
-        // AudioCaptureService.StopCapture() は内部で NAudio の WasapiCapture.StopRecording +
+        // AudioCaptureService.StopCapture() は内部で NAudio の WasapiRecorder.StopRecording +
         // Dispose を同期実行する。 これらは native callback スレッド完了待ち (WaitForSingleObject 系)
         // を含むため、 UI スレッドから直接呼ぶと「停止ボタン押下でアプリ全体フリーズ」になる
         // (2026-05-17 ゆろさん環境で観測)。 Task.Run + WaitAsync(3s) で別スレッドに逃がし、
@@ -564,7 +588,7 @@ public sealed class TranslationPipelineService : ITranslationPipelineService, IA
 
         // 自動 Pause 監視ループの停止 (audio 処理停止と独立にキャンセル → 完了待ち)。
         _autoPauseCts?.Cancel();
-        if (_autoPauseTask is { } apTask)
+        if (!skipAutoPauseTaskAwait && _autoPauseTask is { } apTask)
         {
             try { await apTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
             catch (TimeoutException) { Logger.Warn("自動 Pause タスク停止がタイムアウト"); }
@@ -1914,19 +1938,10 @@ public sealed class TranslationPipelineService : ITranslationPipelineService, IA
                 var elapsed = (DateTime.UtcNow - _lastSpeechUtc).TotalSeconds;
                 if (elapsed < settings.AutoPauseOnSilenceSec) continue;
 
-                Logger.Info($"自動 Pause 発火: {elapsed:F0}秒間 speech 未検出のためキャプチャを停止します");
-                try
-                {
-                    _audioCaptureService.StopCapture();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"自動 Pause で StopCapture 失敗: {ex.Message}");
-                }
+                Logger.Info($"自動 Pause 発火: {elapsed:F0}秒間 speech 未検出のためパイプラインを停止します");
+                await StopForAutoPauseAsync(elapsed).ConfigureAwait(false);
 
-                StatsUpdated?.Invoke(this, BuildCurrentStats($"⏸️ 約{(int)elapsed}秒間 speech 未検出のため自動停止しました"));
-
-                // 1 回発火で抜ける (ユーザーが Start 押し直すと新タスクが起動)。
+                // 1 回発火で抜ける (UI が停止状態へ同期し、ユーザーが Start を押し直せる)。
                 break;
             }
         }
@@ -1935,6 +1950,27 @@ public sealed class TranslationPipelineService : ITranslationPipelineService, IA
         {
             Logger.Warn($"自動 Pause ループで予期しないエラー: {ex.Message}", ex);
         }
+    }
+
+    private async Task StopForAutoPauseAsync(double elapsedSeconds)
+    {
+        // AutoPauseLoopAsync 自身から通常の StopAsync を呼ぶと StopCoreAsync が _autoPauseTask
+        // (= 現在のタスク) を待ってしまう。開始停止ロックは共有しつつ、現在タスクの待機だけ省く。
+        await _startStopLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (!_isRunning) return;
+            await StopCoreAsync(CancellationToken.None, skipAutoPauseTaskAwait: true).ConfigureAwait(false);
+        }
+        finally
+        {
+            _startStopLock.Release();
+        }
+
+        var duration = TimeSpan.FromSeconds(elapsedSeconds);
+        StatsUpdated?.Invoke(this, BuildCurrentStats(
+            $"⏸️ 約{(int)duration.TotalSeconds}秒間 speech 未検出のため自動停止しました"));
+        AutoPaused?.Invoke(this, new AutoPausedEventArgs(duration));
     }
 
     /// <summary>

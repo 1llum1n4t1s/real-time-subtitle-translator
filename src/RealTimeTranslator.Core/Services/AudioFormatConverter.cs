@@ -19,7 +19,7 @@ public static class AudioFormatConverter
 
         var outputCount = (int)(samples16k.Length * (double)TargetSampleRate / SourceSampleRate) + 1;
         var output = new float[outputCount];
-        var read = resampler.Read(output, 0, outputCount);
+        var read = resampler.Read(output);
         if (read == 0) return [];
         if (read == outputCount) return output; // 全長取れた場合は再確保しない（約 9 割のケース）
 
@@ -68,11 +68,11 @@ internal sealed class BufferSampleProvider : ISampleProvider
         WaveFormat = waveFormat;
     }
 
-    public int Read(float[] buffer, int offset, int count)
+    public int Read(Span<float> buffer)
     {
-        var available = Math.Min(count, _buffer.Length - _position);
+        var available = Math.Min(buffer.Length, _buffer.Length - _position);
         if (available <= 0) return 0;
-        Array.Copy(_buffer, _position, buffer, offset, available);
+        _buffer.AsSpan(_position, available).CopyTo(buffer);
         _position += available;
         return available;
     }
@@ -152,7 +152,7 @@ public sealed class StreamingResampler
         var output = new float[wantOut];
         // 1 回だけ Read する。 WDL が先読み不足で wantOut 未満しか返せない場合、
         // 残りは次回入力が来てから出力される (ループして無理に埋めない)。
-        var got = _resampler.Read(output, 0, wantOut);
+        var got = _resampler.Read(output);
         if (got <= 0) return [];
         _totalOutSamples += got;
 
@@ -220,11 +220,11 @@ public sealed class StreamingResampler
             _end = 0;
         }
 
-        public int Read(float[] buffer, int offset, int count)
+        public int Read(Span<float> buffer)
         {
-            var available = Math.Min(count, _end - _start);
+            var available = Math.Min(buffer.Length, _end - _start);
             if (available <= 0) return 0;
-            Array.Copy(_buffer, _start, buffer, offset, available);
+            _buffer.AsSpan(_start, available).CopyTo(buffer);
             _start += available;
             return available;
         }

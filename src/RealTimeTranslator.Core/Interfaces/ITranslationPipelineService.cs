@@ -19,6 +19,11 @@ public interface ITranslationPipelineService : IAsyncDisposable, IDisposable
     event EventHandler<PipelineStatsEventArgs>? StatsUpdated;
 
     /// <summary>
+    /// 無音継続による自動停止が完了したときに発火するイベント
+    /// </summary>
+    event EventHandler<AutoPausedEventArgs>? AutoPaused;
+
+    /// <summary>
     /// エラーが発生したときに発火するイベント
     /// </summary>
     event EventHandler<Exception>? ErrorOccurred;
@@ -46,6 +51,18 @@ public interface ITranslationPipelineService : IAsyncDisposable, IDisposable
     // (StartAsync 内で _settingsMonitor.CurrentValue から再取得して即上書きされるため)。
     // hot-reload は IOptionsMonitor.OnChange 経由で各サービスに伝わるので不要。 → 削除済み。
     // 将来 hot reconnect 機能を実装するなら IRealtimeTranscriber.ConfigureAsync を経由する設計に。
+}
+
+/// <summary>無音継続による自動停止の情報。</summary>
+public sealed class AutoPausedEventArgs : EventArgs
+{
+    public AutoPausedEventArgs(TimeSpan silenceDuration)
+    {
+        SilenceDuration = silenceDuration;
+    }
+
+    /// <summary>最後の speech 検出から自動停止までの経過時間。</summary>
+    public TimeSpan SilenceDuration { get; }
 }
 
 /// <summary>

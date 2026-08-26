@@ -179,6 +179,15 @@ public sealed class TranslationPipelineServiceAdversarialTests
         public void Dispose() { }
     }
 
+    private sealed class ThrowOnResetVad : IVoiceActivityDetector
+    {
+        public int RequiredFrameSize => 512;
+        public int SampleRate => 16000;
+        public float DetectSpeechProb(ReadOnlySpan<float> frame16kHz) => 0f;
+        public void Reset() => throw new InvalidOperationException("reset failed");
+        public void Dispose() { }
+    }
+
     private static class ResourceTestPipelineFactory
     {
         private static AppSettings BuildSettings() => new()
@@ -1021,6 +1030,65 @@ public sealed class TranslationPipelineServiceAdversarialTests
             await pipeline.StopAsync();
         });
         Assert.IsNull(ex, $"二重 Start / 二重 Stop は冪等で例外を投げてはいけない (実際: {ex})");
+    }
+
+    [TestMethod]
+    [TestCategory("Adversarial")]
+    public async Task StartAsync_AfterConnectInitializationFailure_DisconnectsPartialSession()
+    {
+        var transcriber = new TestRealtimeTranscriber();
+        var settings = new AppSettings
+        {
+            OpenAIRealtime = new OpenAIRealtimeSettings { ApiKey = "test-key" }
+        };
+        await using var pipeline = new TranslationPipelineService(
+            new TestAudioCaptureService(),
+            transcriber,
+            new StubOptionsMonitor(settings),
+            new TestSettingsService(),
+            new ThrowOnResetVad());
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => pipeline.StartAsync(CancellationToken.None));
+
+        Assert.AreEqual(1, transcriber.ConnectCallCount);
+        Assert.AreEqual(1, transcriber.DisconnectCallCount);
+        Assert.AreEqual(ConnectionState.Disconnected, transcriber.State);
+    }
+
+    [TestMethod]
+    [TestCategory("Adversarial")]
+    [Timeout(30000)]
+    public async Task AutoPause_StopsEntirePipelineAndRaisesCompletionEvent()
+    {
+        var transcriber = new TestRealtimeTranscriber();
+        var audio = new TestAudioCaptureService();
+        var settings = new AppSettings
+        {
+            OpenAIRealtime = new OpenAIRealtimeSettings { ApiKey = "test-key" },
+            AudioCapture = new AudioCaptureSettings
+            {
+                EnableVad = true,
+                AutoPauseOnSilenceSec = 1,
+            }
+        };
+        await using var pipeline = new TranslationPipelineService(
+            audio,
+            transcriber,
+            new StubOptionsMonitor(settings),
+            new TestSettingsService(),
+            new TestVoiceActivityDetector());
+        var paused = new TaskCompletionSource<AutoPausedEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        pipeline.AutoPaused += (_, e) => paused.TrySetResult(e);
+
+        await pipeline.StartAsync(CancellationToken.None);
+        var result = await paused.Task.WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.IsTrue(result.SilenceDuration >= TimeSpan.FromSeconds(1));
+        Assert.AreEqual(1, transcriber.DisconnectCallCount, "自動PauseはWebSocketまで切断する");
+        Assert.AreEqual(ConnectionState.Disconnected, transcriber.State);
+        Assert.IsTrue(audio.StopCaptureCallCount >= 1, "自動Pauseはキャプチャを停止する");
     }
 
     // v1.0.27: OnMaxSegmentLifetimeTimer_AfterDeltaFullyTerminated_NoExtraEmit 削除済み

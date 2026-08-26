@@ -19,9 +19,8 @@ public interface IAudioCaptureService : IDisposable
     /// </summary>
     /// <param name="processId">対象プロセスID</param>
     /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <param name="captureCreationContext">指定時は CreateForProcessCaptureAsync をこのコンテキスト（例: UI スレッド）で実行。null の場合は呼び出しスレッドで実行</param>
     /// <returns>キャプチャ開始に成功したかどうか</returns>
-    Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken, SynchronizationContext? captureCreationContext = null);
+    Task<bool> StartCaptureWithRetryAsync(int processId, CancellationToken cancellationToken);
 
     /// <summary>
     /// 音声キャプチャを停止

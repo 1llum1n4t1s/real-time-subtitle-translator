@@ -21,33 +21,9 @@
 
 ## 3. 各項目の技術詳細と実装方針
 
-### 3.1. プロセス単位音声キャプチャの強化
+### 3.1. プロセス単位音声キャプチャ（解決済み）
 
-**現状の課題**
-
-現在の `AudioCaptureService` は、NAudioの `WasapiLoopbackCapture()` をデフォルトコンストラクタで初期化しています。この方法では、システム全体で再生されているすべての音声をキャプチャしてしまい、設計書で要求されている「指定したアプリの音声のみを取得する」という要件を完全には満たせていません。
-
-**実装方針**
-
-Windows 10 (21H1) 以降で導入された `AudioClientActivationParams` を利用して、特定のプロセスIDに紐づくオーディオセッションから直接ループバックキャプチャを行います。これにより、他のアプリケーションの通知音やBGMなどを完全に排除し、ASRの精度を最大化します。
-
-具体的な実装手順は以下の通りです。
-
-1.  **Win32 APIの定義**: P/Invoke (`DllImport`) を使用して、`ActivateAudioInterfaceAsync` 関数と、`AUDIOCLIENT_ACTIVATION_PARAMS` 構造体をC#コード内に定義します。
-
-    ```csharp
-    [StructLayout(LayoutKind.Sequential)]
-    public struct AUDIOCLIENT_ACTIVATION_PARAMS
-    {
-        public AUDIOCLIENT_ACTIVATION_TYPE ActivationType;
-        public PROCESS_LOOPBACK_MODE ProcessLoopbackMode;
-        public uint TargetProcessId;
-    }
-    ```
-
-2.  **オーディオクライアントの有効化**: `ActivateAudioInterfaceAsync` を呼び出し、対象のプロセスIDを設定した `AUDIOCLIENT_ACTIVATION_PARAMS` を渡すことで、そのプロセス専用の `IAudioClient` インターフェースを取得します。
-
-3.  **NAudioとの連携**: 取得した `IAudioClient` を利用して、NAudioの `WasapiLoopbackCapture` を初期化します。これにより、キャプチャ対象が指定したプロセスに限定されます。
+`AudioCaptureService` は 1llum1n4t1s.NAudio 4.x の `WasapiRecorderBuilder.WithProcessLoopback` を利用し、指定プロセスと子プロセスだけを取得します。`ActivateAudioInterfaceAsync`、COM マーシャリング、capture thread は NAudio 側に集約したため、アプリ独自の P/Invoke 実装はありません。
 
 ### 3.2. ローカル翻訳エンジンの実装
 

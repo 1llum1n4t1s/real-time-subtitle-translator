@@ -324,6 +324,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _pipelineService.SubtitleGenerated += OnSubtitleGenerated;
         _pipelineService.StatsUpdated += OnPipelineStatsUpdated;
+        _pipelineService.AutoPaused += OnPipelineAutoPaused;
         _pipelineService.ErrorOccurred += OnPipelineError;
         _pipelineService.AudioLevelUpdated += OnAudioLevelUpdated;
 
@@ -484,9 +485,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         _previewMonitorProcessId = proc.Id;
         _levelMonitor.GainDb = _settingsViewModel.InputGainDb;
-        // Process Loopback の STA バインド要件に合わせ、 呼び出し時 (UI スレッド) の SynchronizationContext を渡す。
-        var uiContext = SynchronizationContext.Current ?? new AvaloniaSynchronizationContext();
-        _ = _levelMonitor.StartAsync(proc.Id, uiContext);
+        _ = _levelMonitor.StartAsync(proc.Id);
     }
 
     /// <summary>
@@ -509,6 +508,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
             EstimatedCostUsd = e.EstimatedCostUsd;
             SessionDuration = e.SessionDuration;
             SkippedSecondsByVad = e.SkippedSecondsByVad;
+        });
+    }
+
+    private void OnPipelineAutoPaused(object? sender, AutoPausedEventArgs e)
+    {
+        RunOnUiThread(() =>
+        {
+            lock (_cancellationLock)
+            {
+                _processingCancellation?.Cancel();
+                _processingCancellation?.Dispose();
+                _processingCancellation = null;
+            }
+
+            IsRunning = false;
+            StatusText = $"⏸️ 約{(int)e.SilenceDuration.TotalSeconds}秒間 speech 未検出のため自動停止しました";
+            StatusColor = Brushes.Gray;
+            Log("無音が続いたため自動停止しました。開始ボタンから再開できます。");
         });
     }
 
@@ -945,11 +962,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Process Loopback は STA（UI）スレッドにバインドするため、キャプチャ開始は必ず UI の SynchronizationContext で実行する。
-            // ボタンクリックで呼ばれる想定なので Current は通常 WPF のコンテキスト。null の場合は Dispatcher から取得して確実に UI で実行する。
-            var uiContext = SynchronizationContext.Current ?? new AvaloniaSynchronizationContext();
-            if (SynchronizationContext.Current == null)
-                LoggerService.LogDebug("[Capture] StartAsync: SynchronizationContext.Current was null, using Dispatcher-based context");
             // スレッドセーフにCancellationTokenSourceを置き換え
             lock (_cancellationLock)
             {
@@ -983,16 +995,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             LoggerService.LogDebug($"StartAsync: Starting audio capture for process: {SelectedProcess.Name} (PID: {pidForCapture}, Title: {SelectedProcess.Title})");
             var captureStarted = await _audioCaptureService.StartCaptureWithRetryAsync(
                 pidForCapture,
-                _processingCancellation.Token,
-                uiContext);
+                _processingCancellation.Token);
 
             if (!captureStarted && capturePid != selectedPid)
             {
                 LoggerService.LogInfo($"[キャプチャ] 選択PID={selectedPid} で開始できなかったため、セッション所有者PID={capturePid} でリトライします");
                 captureStarted = await _audioCaptureService.StartCaptureWithRetryAsync(
                     capturePid,
-                    _processingCancellation.Token,
-                    uiContext);
+                    _processingCancellation.Token);
                 if (captureStarted)
                     pidForCapture = capturePid;
             }
@@ -1020,6 +1030,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            lock (_cancellationLock)
+            {
+                _processingCancellation?.Cancel();
+                _processingCancellation?.Dispose();
+                _processingCancellation = null;
+            }
+            try
+            {
+                // pipeline 開始後に WASAPI キャプチャ開始が例外になった場合も接続を残さない。
+                await _pipelineService.StopAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (Exception cleanupEx)
+            {
+                LoggerService.LogWarning($"StartAsync: 起動失敗後のパイプライン停止にも失敗: {cleanupEx.Message}");
+            }
             IsRunning = false;
             StatusText = "エラー";
             StatusColor = Brushes.Red;
@@ -1056,11 +1081,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             LoggerService.LogInfo($"[キャプチャ] 持続無音のため選択ウィンドウPID={windowPid} で再キャプチャを試行します");
             Log("音声が検出されないため、別のプロセスで再キャプチャを試行します…");
             _audioCaptureService.StopCapture();
-            var uiCtx = SynchronizationContext.Current ?? new AvaloniaSynchronizationContext();
             var started = await _audioCaptureService.StartCaptureWithRetryAsync(
                 windowPid,
-                cancellationToken,
-                uiCtx);
+                cancellationToken);
             if (started)
             {
                 LoggerService.LogInfo($"[キャプチャ] 選択ウィンドウPID={windowPid} でキャプチャを開始しました");
@@ -1421,6 +1444,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _pipelineService.SubtitleGenerated -= OnSubtitleGenerated;
         _pipelineService.StatsUpdated -= OnPipelineStatsUpdated;
+        _pipelineService.AutoPaused -= OnPipelineAutoPaused;
         _pipelineService.ErrorOccurred -= OnPipelineError;
         _audioCaptureService.CaptureStatusChanged -= OnCaptureStatusChanged;
         _settingsViewModel.SettingsSaved -= OnSettingsSaved;

@@ -28,12 +28,8 @@ public interface IAudioLevelMonitor : IDisposable
     /// キャプチャ開始に失敗しても例外は投げず、 <see cref="IsMonitoring"/>=false のままに倒れる (silent-fail)。
     /// </summary>
     /// <param name="processId">対象プロセス ID。</param>
-    /// <param name="captureCreationContext">
-    /// WASAPI Process Loopback は STA (UI) スレッドにバインドするため、 UI の SynchronizationContext を渡す。
-    /// null の場合は呼び出しスレッドで生成する (本番パイプライン StartAsync と同じ作法)。
-    /// </param>
     /// <param name="cancellationToken">キャンセルトークン。</param>
-    Task StartAsync(int processId, SynchronizationContext? captureCreationContext = null, CancellationToken cancellationToken = default);
+    Task StartAsync(int processId, CancellationToken cancellationToken = default);
 
     /// <summary>プレビュー計測を停止する (idempotent)。 停止後はレベル 0 相当を 1 回通知する。</summary>
     void Stop();
