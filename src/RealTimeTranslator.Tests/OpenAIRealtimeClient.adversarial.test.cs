@@ -92,6 +92,15 @@ public sealed class OpenAIRealtimeClientAdversarialTests
             Model = "test"
         };
 
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        typeof(OpenAIRealtimeClient).GetField("_totalAudioInputSamples24kHz", flags)!.SetValue(client, 24000L);
+        typeof(OpenAIRealtimeClient).GetField("_serverReportedAudioInputTokens", flags)!.SetValue(client, 100L);
+        typeof(OpenAIRealtimeClient).GetField("_totalDroppedAudioChunks", flags)!.SetValue(client, 3L);
+        typeof(OpenAIRealtimeClient).GetField("_totalDeltaCount", flags)!.SetValue(client, 7L);
+        typeof(OpenAIRealtimeClient).GetField("_totalDoneCount", flags)!.SetValue(client, 2L);
+        typeof(OpenAIRealtimeClient).GetField("_lastTranscriptResponseId", flags)!.SetValue(client, "response-previous");
+        typeof(OpenAIRealtimeClient).GetField("_lastTranscriptEventGroup", flags)!.SetValue(client, "audio_transcript");
+
         // 例外型は環境（OS / .NET ランタイム）依存で WebSocketException 以外
         // （SocketException / HttpRequestException 等）になることがあるため、型は固定せず
         // 「失敗イベントが通知され、状態が Connected にならない」ことだけを検証する。
@@ -100,7 +109,6 @@ public sealed class OpenAIRealtimeClientAdversarialTests
 
         Assert.AreNotEqual(ConnectionState.Connected, client.State, "失敗時に Connected 状態にはならない");
 
-        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         var shouldReconnect = (bool)typeof(OpenAIRealtimeClient).GetField("_shouldReconnect", flags)!.GetValue(client)!;
         var cts = typeof(OpenAIRealtimeClient).GetField("_cts", flags)!.GetValue(client);
         var ws = typeof(OpenAIRealtimeClient).GetField("_ws", flags)!.GetValue(client);
@@ -113,6 +121,13 @@ public sealed class OpenAIRealtimeClientAdversarialTests
         Assert.AreNotSame(settings, capturedSettings, "走行中変更が再接続へ漏れないよう設定をコピーする");
         settings.ApiKey = "changed-after-connect";
         Assert.AreEqual("sk-fake-key", capturedSettings.ApiKey);
+        Assert.AreEqual(0L, client.TotalAudioInputSamples24kHz, "新しい Start では前セッションの音声サンプル累積を破棄する");
+        Assert.AreEqual(0L, client.ServerReportedAudioInputTokens, "新しい Start では前セッションの server token 累積を破棄する");
+        Assert.AreEqual(0L, client.DroppedAudioChunkCount, "新しい Start では前セッションの drop 累積を破棄する");
+        Assert.AreEqual(0L, typeof(OpenAIRealtimeClient).GetField("_totalDeltaCount", flags)!.GetValue(client));
+        Assert.AreEqual(0L, typeof(OpenAIRealtimeClient).GetField("_totalDoneCount", flags)!.GetValue(client));
+        Assert.IsNull(typeof(OpenAIRealtimeClient).GetField("_lastTranscriptResponseId", flags)!.GetValue(client));
+        Assert.IsNull(typeof(OpenAIRealtimeClient).GetField("_lastTranscriptEventGroup", flags)!.GetValue(client));
     }
 
     /// <adversarial category="state" severity="medium" />

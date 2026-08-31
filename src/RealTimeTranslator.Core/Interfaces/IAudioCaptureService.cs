@@ -55,8 +55,11 @@ public interface IAudioCaptureService : IDisposable
     event EventHandler<CaptureStatusEventArgs>? CaptureStatusChanged;
 }
 
-/// <summary>キャプチャ状態変更イベント引数 (Message + IsWaiting)。</summary>
-public sealed record CaptureStatusEventArgs(string Message, bool IsWaiting = false);
+/// <summary>キャプチャ状態変更イベント引数。</summary>
+/// <param name="Message">ユーザー向け状態メッセージ。</param>
+/// <param name="IsWaiting">音声セッション待機中なら <see langword="true"/>。</param>
+/// <param name="Error">実行中のキャプチャが予期せず停止した原因。通常の状態遷移では <see langword="null"/>。</param>
+public sealed record CaptureStatusEventArgs(string Message, bool IsWaiting = false, Exception? Error = null);
 
 /// <summary>音声データイベント引数 (16kHz mono float32 + タイムスタンプ)。</summary>
 public sealed record AudioDataEventArgs(float[] AudioData, DateTime Timestamp);

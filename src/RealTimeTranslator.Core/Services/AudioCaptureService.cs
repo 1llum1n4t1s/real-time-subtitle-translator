@@ -304,9 +304,9 @@ public class AudioCaptureService : IAudioCaptureService
     /// <summary>
     /// キャプチャ状態変更イベントを発火
     /// </summary>
-    private void OnCaptureStatusChanged(string message, bool isWaiting)
+    private void OnCaptureStatusChanged(string message, bool isWaiting, Exception? error = null)
     {
-        CaptureStatusChanged?.Invoke(this, new CaptureStatusEventArgs(message, isWaiting));
+        CaptureStatusChanged?.Invoke(this, new CaptureStatusEventArgs(message, isWaiting, error));
     }
 
     /// <summary>
@@ -492,7 +492,8 @@ public class AudioCaptureService : IAudioCaptureService
             //
             // 改修:
             // 1. `LogException` で型・メッセージ・StackTrace + COMException 専用に HResult を 16 進で記録
-            // 2. `OnCaptureStatusChanged` 経由で UI に終了を通知 (緑のまま固まる UX バグ解消)
+            // 2. `OnCaptureStatusChanged` へ例外を載せ、 UI が通常の開始成功通知と区別して
+            //    パイプライン/WebSocket を停止できるようにする。
             //    typical 原因: 対象プロセス終了 / デバイス切替 / アクセス拒否 等
             string hresultText = string.Empty;
             if (e.Exception is COMException comEx)
@@ -505,7 +506,8 @@ public class AudioCaptureService : IAudioCaptureService
 
             OnCaptureStatusChanged(
                 $"音声キャプチャが停止しました (対象プロセス終了 / デバイス切替の可能性: {e.Exception.GetType().Name}{hresultText})",
-                isWaiting: false);
+                isWaiting: false,
+                error: e.Exception);
         }
     }
 

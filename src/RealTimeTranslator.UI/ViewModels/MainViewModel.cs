@@ -58,6 +58,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly System.Threading.Lock _cancellationLock = new();
     private string? _lastLogMessage;
     private CancellationTokenSource? _processingCancellation;
+    private int _unexpectedCaptureStopInFlight;
     // プレビューモニタが現在計測中のプロセス ID。 同一プロセス再選択時に無駄な Stop/Start を避けるため。
     // 「更新」ボタンで RestoreLastSelectedProcess が同じプロセスを再選択しても再起動しない (フリーズ予防)。
     private int _previewMonitorProcessId;
@@ -1187,6 +1188,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         RunOnUiThread(() =>
         {
+            if (e.Error is not null)
+            {
+                StatusText = e.Message;
+                StatusColor = Brushes.Red;
+                Log(e.Message);
+
+                // isWaiting=false は開始成功/キャンセルにも使われるため停止条件にはできない。
+                // AudioCaptureService が明示した予期しない停止だけを 1 回処理し、接続と処理タスクを残さない。
+                if (IsRunning && Interlocked.CompareExchange(ref _unexpectedCaptureStopInFlight, 1, 0) == 0)
+                    _ = HandleUnexpectedCaptureStopAsync(e.Message);
+                return;
+            }
+
             if (e.IsWaiting)
             {
                 StatusText = e.Message;
@@ -1194,6 +1208,44 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             Log(e.Message, suppressDuplicate: e.IsWaiting);
         });
+    }
+
+    private async Task HandleUnexpectedCaptureStopAsync(string message)
+    {
+        try
+        {
+            lock (_cancellationLock)
+            {
+                _processingCancellation?.Cancel();
+                _processingCancellation?.Dispose();
+                _processingCancellation = null;
+            }
+
+            try
+            {
+                await _pipelineService.StopAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                LoggerService.LogWarning("予期しないキャプチャ停止後のパイプライン停止が 10 秒を超過しました。");
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogException("予期しないキャプチャ停止後のパイプライン停止に失敗しました。", ex);
+            }
+
+            _overlayViewModel.ClearSubtitles();
+            IsRunning = false;
+            // StopAsync の StatsUpdated が「停止」で上書きしても、利用者が原因を確認できる表示を最後に残す。
+            StatusText = message;
+            StatusColor = Brushes.Red;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _unexpectedCaptureStopInFlight, 0);
+        }
     }
 
 

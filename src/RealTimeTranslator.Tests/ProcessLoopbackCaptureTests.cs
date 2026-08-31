@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
+using RealTimeTranslator.Core.Interfaces;
 using RealTimeTranslator.Core.Services;
 
 namespace RealTimeTranslator.Tests;
@@ -26,6 +27,25 @@ public sealed class ProcessLoopbackCaptureTests
 
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(
             () => builder.BuildAsync(source.Token));
+    }
+
+    [TestMethod]
+    public void RecordingStopped_WithException_PropagatesUnexpectedStopCause()
+    {
+        using var capture = new AudioCaptureService();
+        CaptureStatusEventArgs? observed = null;
+        capture.CaptureStatusChanged += (_, e) => observed = e;
+        var failure = new InvalidOperationException("device removed");
+        var method = typeof(AudioCaptureService).GetMethod(
+            "OnRecordingStopped",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        Assert.IsNotNull(method);
+        method.Invoke(capture, [null, new StoppedEventArgs(failure)]);
+
+        Assert.IsNotNull(observed);
+        Assert.AreSame(failure, observed.Error);
+        Assert.IsFalse(observed.IsWaiting);
     }
 
     [TestMethod]

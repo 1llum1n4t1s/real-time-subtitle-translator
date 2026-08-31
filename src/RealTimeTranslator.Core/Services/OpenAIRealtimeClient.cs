@@ -88,8 +88,7 @@ public sealed class OpenAIRealtimeClient : Interfaces.IRealtimeTranscriber
     private long _totalDoneCount;
 
     // ───────── token / cost 統計 (見える化保険) ─────────
-    // インスタンス寿命 = Start から Dispose まで。 ConnectAsync 単位ではリセットしない
-    // (再接続で累積が消えると UI の cost 表示が巻き戻って混乱するため、 累積継続)。
+    // 新しい Start (= ConnectAsync) でリセットし、同一 Start 内の自動再接続では累積を維持する。
     private long _totalAudioInputSamples24kHz;
     private long _serverReportedAudioInputTokens;
 
@@ -177,6 +176,21 @@ public sealed class OpenAIRealtimeClient : Interfaces.IRealtimeTranscriber
                 DeltaIdleFinalizeMs = settings.DeltaIdleFinalizeMs,
             };
             _shouldReconnect = true;
+
+            // 新しい Start ごとにセッション統計をリセットする。 OpenAIRealtimeClient は singleton 共有なので、
+            // 前回セッションの累積サンプル/server token/drop 数を残すと再 Start 後のコスト表示へ混入する。
+            // reconnect は ConnectWebSocketAsync を直接呼ぶため、このリセットを通らず同一セッション累積を維持する。
+            Interlocked.Exchange(ref _totalAudioInputSamples24kHz, 0);
+            Interlocked.Exchange(ref _serverReportedAudioInputTokens, 0);
+            Interlocked.Exchange(ref _totalDroppedAudioChunks, 0);
+            Interlocked.Exchange(ref _totalDeltaCount, 0);
+            Interlocked.Exchange(ref _totalDoneCount, 0);
+            lock (_transcriptDedupeLock)
+            {
+                _lastTranscriptResponseId = null;
+                _lastTranscriptEventGroup = null;
+            }
+
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             // 容量 30: 1 chunk ≒ 80ms で約 2.4 秒分のバッファ。
             // 旧 100 (≒8秒) だと DropOldest 発動まで時間がかかり追いつきが遅かった。
