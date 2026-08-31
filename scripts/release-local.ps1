@@ -101,6 +101,16 @@ if (-not $SkipUpload) {
 if (Test-Path $WorkDir) { Remove-Item $WorkDir -Recurse -Force }
 New-Item -ItemType Directory -Path $ArtifactsDir -Force | Out-Null
 
+# ReadyToRun は入力/出力の更新時刻だけで増分判定するため、更新後パッケージの DLL が
+# 既存 R2R 出力より古い時刻だと旧 DLL を再利用してしまう。リリース時だけ生成キャッシュを
+# 破棄し、lockfile が解決した依存を必ず crossgen2 し直す。
+$uiReleaseObjDir = [IO.Path]::GetFullPath((Join-Path $RepoRoot 'src\RealTimeTranslator.UI\obj\Release'))
+$r2rCacheDir = [IO.Path]::GetFullPath((Join-Path $uiReleaseObjDir 'R2R'))
+if (-not $r2rCacheDir.StartsWith("$uiReleaseObjDir$([IO.Path]::DirectorySeparatorChar)", [StringComparison]::OrdinalIgnoreCase)) {
+    throw "ReadyToRun キャッシュが UI Release obj 配下ではありません: $r2rCacheDir"
+}
+if (Test-Path -LiteralPath $r2rCacheDir) { Remove-Item -LiteralPath $r2rCacheDir -Recurse -Force }
+
 # ---- 1. ビルド + 署名付きパッケージング (RID ごと) ----
 foreach ($runtime in $Runtimes) {
     $config = $RuntimeMatrix[$runtime]

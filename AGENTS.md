@@ -14,7 +14,7 @@ RealTimeTranslator is a Windows desktop app for real-time subtitle translation. 
 
 ```bash
 # 1 回だけ実行 (lockfile を win-x64 RID 込みで生成)
-dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate
+dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate -p:Configuration=Release -p:Platform=x64
 
 # 以降は必ず --no-restore を付ける (暗黙 restore が lockfile から RID を消すのを抑止)
 dotnet build RealTimeTranslator.slnx -c Release -p:Platform=x64 --no-restore
@@ -50,7 +50,7 @@ runtime identifiers .` が出たらこれ)。 リリース時はこう動く:
 - **コミット前後で staged / committed blob を検証する**: `git show :src/RealTimeTranslator.Core/packages.lock.json | grep -c win-x64`
   で staged blob に win-x64 が 1 以上あることを確認してから commit、 commit 後も `git show HEAD:<path>` で再確認してから
   push する。 working tree の grep だけ見ると「直ったつもり」で剥がれた版を commit してしまう。
-- **パッケージ版を変えたリリース** → `dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate && git add <3 lockfile>`
+- **パッケージ版を変えたリリース** → `dotnet restore RealTimeTranslator.slnx -r win-x64 --force-evaluate -p:Configuration=Release -p:Platform=x64 && git add <3 lockfile>`
   を **同一コマンドチェーンで atomic に** 実行する。 restore と git add の間に別ツール (= 裏 restore の発火点) を挟ませず、
   剥がれる前に index へ win-x64 を確定させる。
 - **パッケージ版を変えないリリース (doc のみ等)** → lockfile は **staged しない**。 `git checkout HEAD -- <剥がれた lockfile>`
