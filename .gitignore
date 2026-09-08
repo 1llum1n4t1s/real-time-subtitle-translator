@@ -36,9 +36,7 @@ logs/
 build_output.txt
 *.log
 
-# Local dev tooling (Claude Code MCP / Serena)
 .mcp.json
-.serena/
 
 # Local release artifacts (scripts/release-local.ps1)
 local-release/

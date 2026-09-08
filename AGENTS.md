@@ -235,7 +235,7 @@ OpenAI Realtime API は **送信した音声を全部 audio input token とし�
 ## バージョン管理 / リリース
 
 - **バージョン番号の更新は `/vava` スキル経由のみ**: コード修正のついでに `Directory.Build.props` の `<Version>` を上げず、`/vava` に一任する。 `/vava` がバージョン計算 + コミット + `release/X.Y.Z` ブランチ作成 + ローカルリリース実行 + 古いリリースブランチ掃除まで一括処理する。 **`/vava` は `vava.config.json` の `localRelease` キーを読んで `scripts/release-local.ps1` を自動実行する** (署名証明書の precheck → リリース実行。 CI 監視ステップはスキップされる)。
-- **リリースはローカル実行**: `pwsh scripts/release-local.ps1` — **CI リリースを廃止しローカル実行に移行** (コード署名に SimplySign Desktop 接続 + スマホ OTP が必要で GitHub Actions からは署名できないため。 release.yml / velopack.yml は削除済み)。 スクリプトが publish (win-x64 self-contained) → `vpk pack` + **Authenticode 署名** (`--signParams`) → 署名検証 → `wrangler@4.92.0` (pnpm dlx) で Cloudflare R2 バケット `realtimetranslator-updates` にアップロード → 配信確認 (`releases.win-x64.json` HTTP 200 + 全アップロードファイルの HEAD 検証) → **manifest 外の旧 `*.nupkg` を Cloudflare API V4 で自動削除** (Aggressive 保持戦略) まで一括実行。 **R2 単独配信** (`https://rtt.kagayoi.com`、 GitHub Releases への publish はしない)。 Cloudflare トークンは `C:\Users\IMT\dev\Secret\secrets.json` の `cloudflare.api_token` を実行時に読む。 動作確認は `-SkipUpload` (ビルド + 署名のみ)。 **実行前提: SimplySign Desktop がトークンログイン済み** (証明書が CurrentUser\My に見えること。 スクリプトがプリフライトで検査して落とす)。
+- 製品ページの配信は `vps-web/deploy/deploy-lp.ps1` を使う。公開ホスト・更新ファイルの既存経路を維持する。
 - **Code signing (Authenticode)**: 全リリースバイナリ (Setup.exe / Portable 内含む) を Certum **Open Source Code Signing in the cloud** 証明書で署名する。 CN=`Open Source Developer Yuichiro Shinozaki` (年次更新で thumbprint が変わるため signtool は `/n` の Subject 名選択を使う)。 鍵は SimplySign クラウド (エクスポート不可)、 署名には SimplySign Desktop のトークンログイン中セッションが必須。 タイムスタンプは `http://time.certum.pl` (RFC3161) — 証明書期限 (1 年) 切れ後も署名済みバイナリは有効。
 - **メモリーバンクの freshness gate**: 一部の git commit hook で `memory-bank/RealTimeTranslator/activeContext.md` の更新日時がコード変更より古いとブロックされる。 大きめの変更後は `memory_bank_update` で `activeContext.md` を更新してからコミットすること。
 
@@ -245,7 +245,7 @@ OpenAI Realtime API は **送信した音声を全部 audio input token とし�
 |---|---|---|
 | `ci.yml` | PR / main push | 通常 CI (restore + build + test、 PR 検証用) |
 | `build.yml` | `workflow_call` | publish ワークフロー (旧 release.yml から呼ばれていた再利用 job、 self-contained win-x64 で publish。 **現在呼び出し元なし** — リリースはローカル実行に移行済み) |
-| `deploy-landing.yml` | main push (`web/**`) / 手動 | ランディングページの Cloudflare Worker デプロイ (リリースフローとは独立) |
+| 製品ページ | VPSへの手動配信 | `vps-web/deploy/deploy-lp.ps1`（アプリのリリースとは独立） |
 
 旧 `release.yml` / `velopack.yml` (CI リリース) は削除済み — リリースは `scripts/release-local.ps1` のローカル実行 (上記 §バージョン管理 / リリース 参照)。 全 actions は SHA 固定 (`@<sha> # vX.Y` 形式)、 サプライチェーン対策。 Dependabot が自動 PR を上げる構成。
 
